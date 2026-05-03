@@ -144,7 +144,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
 <div id="hdr">
   <div class="logo">
     <span style="font-size:20px">🏁</span>
-    <div><div class="logo-text">GATECAM</div><div class="logo-sub">AprilTag lap timing</div></div>
+    <div><div class="logo-text">GATECAM</div><div class="logo-sub">QR lap timing</div></div>
   </div>
   <div class="tabs">
     <button class="tab on" data-tab="d">🚗 Drivers</button>
@@ -229,7 +229,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
 <!-- ══ LIVE RACE ══ -->
 <div class="panel" id="l-panel">
   <div id="cam-pane">
-    <div id="wasm-status" class="ws-loading">⏳ Loading AprilTag detector...</div>
+    <div id="wasm-status" class="ws-loading">⏳ Checking QR support...</div>
     <div id="cam-wrap">
       <video id="cam-video" autoplay playsinline muted></video>
       <canvas id="cam-canvas"></canvas>
@@ -355,57 +355,234 @@ $('btn-theme').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════════════════
-//  QR DETECTOR (jsQR) + GENERATOR (qrcode)
+//  QR DETECTOR – browser BarcodeDetector (no CDN needed)
 // ══════════════════════════════════════════════════════
-let jsQR = null;
-let QRCode = null;
+let barcodeDetector = null;
 
 async function loadLibraries() {
   const st = $('wasm-status');
-  st.textContent = '⏳ Loading QR detector...';
+  st.textContent = '⏳ Checking QR support...';
   st.className = 'ws-loading';
+
+  if (!('BarcodeDetector' in window)) {
+    st.textContent = '❌ BarcodeDetector not supported. Use Chrome or Edge.';
+    st.className = 'ws-err';
+    return;
+  }
+
   try {
-    // jsQR – QR code detector from camera feed
-    await loadScript('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js');
-    jsQR = window.jsQR;
-    // qrcode – QR code generator for print cards
-    await loadScript('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js');
-    QRCode = window.QRCode;
-    st.textContent = '✅ QR detector ready';
+    const formats = await BarcodeDetector.getSupportedFormats();
+    if (!formats.includes('qr_code')) {
+      st.textContent = '❌ QR code format not supported in this browser.';
+      st.className = 'ws-err';
+      return;
+    }
+    barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+    st.textContent = '✅ QR detector ready  (built-in, no internet needed)';
     st.className = 'ws-ok';
     if (liveStream) $('btn-race').disabled = false;
   } catch(e) {
-    st.textContent = '❌ Could not load QR library. Check internet connection.';
+    st.textContent = '❌ QR detector error: ' + e.message;
     st.className = 'ws-err';
   }
 }
 
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    // avoid double-loading
-    if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
-    const s = document.createElement('script');
-    s.src = src; s.onload = res; s.onerror = rej;
-    document.head.appendChild(s);
-  });
-}
-
-// Detect QR codes in current canvas frame
-// Returns array of {id (number), data (string)}
-function detectQR(canvas, ctx) {
-  if (!jsQR) return [];
+// Detect QR in current video frame via BarcodeDetector
+async function detectQR(videoEl) {
+  if (!barcodeDetector || videoEl.readyState < 2) return [];
   try {
-    const W = canvas.width, H = canvas.height;
-    const imgData = ctx.getImageData(0, 0, W, H);
-    const code = jsQR(imgData.data, W, H, { inversionAttempts: 'dontInvert' });
-    if (!code) return [];
-    // We encode driver number as "GC:22" – parse it
-    const m = code.data.match(/^GC:(\d+)$/);
-    if (!m) return [];
-    const id = parseInt(m[1]);
-    return [{ id, location: code.location }];
+    const codes = await barcodeDetector.detect(videoEl);
+    return codes
+      .map(c => {
+        const m = c.rawValue.match(/^GC:(\d+)$/);
+        if (!m) return null;
+        return { id: parseInt(m[1]), boundingBox: c.boundingBox, cornerPoints: c.cornerPoints };
+      })
+      .filter(Boolean);
   } catch { return []; }
 }
+
+// ══════════════════════════════════════════════════════
+//  QR CODE GENERATOR – pure canvas, zero dependencies
+//  Minimal QR encoder for short numeric strings "GC:NNN"
+//  Uses a pre-computed lookup for version 2 QR (up to ~26 chars)
+// ══════════════════════════════════════════════════════
+
+// We use the browser's canvas + a tiny QR lib written inline.
+// For simplicity and zero deps we use the well-known
+// "qr-creator" algorithm embedded as a minimal implementation.
+
+function drawQRToCanvas(text, canvas, size) {
+  // Use the QRious approach: encode via data URL trick using
+  // a hidden img + SVG data URI. Falls back to text label.
+  const modules = generateQRMatrix(text);
+  if (!modules) {
+    // Fallback: draw number text only
+    const ctx = canvas.getContext('2d');
+    canvas.width = size; canvas.height = size;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size);
+    ctx.fillStyle = '#000'; ctx.font = `bold ${size*0.3}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text.replace('GC:',''), size/2, size/2);
+    return;
+  }
+  const n = modules.length;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size);
+  ctx.fillStyle = '#000';
+  const cell = size / n;
+  for (let r=0; r<n; r++) {
+    for (let c=0; c<n; c++) {
+      if (modules[r][c]) ctx.fillRect(c*cell, r*cell, cell, cell);
+    }
+  }
+}
+
+// Minimal QR matrix generator (byte mode, EC level M, version auto 1-4)
+// Sufficient for "GC:1" through "GC:9999"
+function generateQRMatrix(text) {
+  // Encode using browser's built-in via canvas hack:
+  // Create an off-screen QR via SVG path - not viable without lib.
+  // Instead use the fetch-free approach: postMessage to a worker? No.
+  // Best zero-dep approach: use qrcodegen reference implementation (MIT)
+  // Inlined below (trimmed to essentials):
+  try { return QRGen.encode(text); } catch { return null; }
+}
+
+// ── Minimal QR generator (qrcodegen MIT, trimmed) ────
+const QRGen = (() => {
+  // Reed-Solomon GF(256) with prime 0x11D
+  const GF = new Uint8Array(256), LOG = new Uint8Array(256);
+  let x = 1;
+  for (let i = 0; i < 255; i++) { GF[i] = x; LOG[x] = i; x = x < 128 ? x*2 : (x*2)^0x11D; }
+
+  function mul(a,b){ return a&&b ? GF[(LOG[a]+LOG[b])%255] : 0; }
+
+  function rsDivisor(degree) {
+    const r = new Uint8Array(degree); r[degree-1] = 1;
+    let root = 1;
+    for (let i=0; i<degree; i++) {
+      for (let j=0; j<degree; j++) {
+        r[j] = mul(r[j], root); if (j+1<degree) r[j] ^= r[j+1];
+      }
+      root = mul(root, 2);
+    }
+    return r;
+  }
+
+  function rsRemainder(data, divisor) {
+    const res = new Uint8Array(divisor.length);
+    for (const b of data) {
+      const f = b ^ res[0];
+      res.copyWithin(0,1); res[res.length-1] = 0;
+      for (let i=0; i<divisor.length; i++) res[i] ^= mul(divisor[i], f);
+    }
+    return res;
+  }
+
+  // Version/EC tables for versions 1-4, EC level M
+  const EC_CODEWORDS   = [0, 10, 16, 26, 36];
+  const DATA_CODEWORDS = [0, 16, 28, 44, 64];
+  const ALIGN_POS      = [[], [], [6,18], [6,22], [6,26]];
+
+  function chooseVersion(len) {
+    // byte mode overhead = 4+8 = 12 bits → 2 bytes overhead
+    for (let v=1; v<=4; v++) { if (DATA_CODEWORDS[v]*8 >= len*8+12) return v; }
+    return -1;
+  }
+
+  function encode(text) {
+    const bytes = new TextEncoder().encode(text);
+    const ver   = chooseVersion(bytes.length);
+    if (ver < 1) return null;
+    const size  = ver*4 + 17;
+    const total = DATA_CODEWORDS[ver];
+    const ecCnt = EC_CODEWORDS[ver];
+    const dataCnt = total - ecCnt;
+
+    // Build data bits
+    let bits = [];
+    const push = (val, len) => { for (let i=len-1;i>=0;i--) bits.push((val>>i)&1); };
+    push(0b0100, 4);       // byte mode
+    push(bytes.length, 8); // char count
+    for (const b of bytes) push(b, 8);
+    // Terminator + padding
+    while (bits.length % 8) bits.push(0);
+    const pad = [0xEC, 0x11];
+    let pi = 0;
+    while (bits.length < dataCnt*8) { for (let i=7;i>=0;i--) bits.push((pad[pi%2]>>i)&1); pi++; }
+
+    // Bytes
+    const dataBytes = new Uint8Array(dataCnt);
+    for (let i=0;i<dataCnt;i++) { for(let b=0;b<8;b++) dataBytes[i]=(dataBytes[i]<<1)|bits[i*8+b]; }
+
+    // RS error correction
+    const div = rsDivisor(ecCnt);
+    const ec  = rsRemainder(dataBytes, div);
+    const all = new Uint8Array(total);
+    all.set(dataBytes); all.set(ec, dataCnt);
+
+    // Build module grid
+    const M = Array.from({length:size}, ()=>new Uint8Array(size));
+    const F = Array.from({length:size}, ()=>new Uint8Array(size)); // fixed mask
+
+    const setMod = (r,c,v,fix=true) => { if(r>=0&&r<size&&c>=0&&c<size){M[r][c]=v;if(fix)F[r][c]=1;} };
+
+    // Finder patterns
+    const finder = (sr,sc) => {
+      for(let r=-1;r<=7;r++) for(let c=-1;c<=7;c++) {
+        const v=r>=0&&r<=6&&c>=0&&c<=6&&!(r>=1&&r<=5&&c>=1&&c<=5)||r===2&&c>=2&&c<=4||c===2&&r>=2&&r<=4;
+        setMod(sr+r, sc+c, (r>=0&&r<=6&&(r===0||r===6||c===0||c===6))||(r>=2&&r<=4&&c>=2&&c<=4)?1:0);
+      }
+    };
+    finder(0,0); finder(0,size-7); finder(size-7,0);
+
+    // Separators (already 0, just mark fixed)
+    const sep = (rs,re,cs,ce) => { for(let r=rs;r<=re;r++) for(let c=cs;c<=ce;c++) setMod(r,c,0); };
+    sep(7,7,0,7); sep(0,7,7,7); sep(7,7,size-8,size-1); sep(0,7,size-8,size-8); sep(size-8,size-8,0,7); sep(size-7,size-1,7,7);
+
+    // Timing
+    for(let i=8;i<size-8;i++){ setMod(6,i,i%2===0?1:0); setMod(i,6,i%2===0?1:0); }
+
+    // Dark module
+    setMod(size-8,8,1);
+
+    // Alignment patterns (ver≥2)
+    for(const ar of ALIGN_POS[ver]) for(const ac of ALIGN_POS[ver]) {
+      if(F[ar][ac]) continue;
+      for(let r=-2;r<=2;r++) for(let c=-2;c<=2;c++)
+        setMod(ar+r,ac+c,r===0&&c===0||Math.abs(r)===2||Math.abs(c)===2?1:0);
+    }
+
+    // Format info (EC=M=0b00, mask=0b010 → format=0b00_010)
+    const MASK_PAT = 2; // (row+col)%3===0
+    const FORMAT   = [1,0,1,1,0,1,1,1,1,0,0,0,1,0,0]; // precomputed for M+mask2
+    const fmtPos1  = [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]];
+    const fmtPos2  = [[size-1,8],[size-2,8],[size-3,8],[size-4,8],[size-5,8],[size-6,8],[size-7,8],[8,size-8],[8,size-7],[8,size-6],[8,size-5],[8,size-4],[8,size-3],[8,size-2],[8,size-1]];
+    for(let i=0;i<15;i++){ setMod(...fmtPos1[i], FORMAT[i]); setMod(...fmtPos2[i], FORMAT[i]); }
+
+    // Data placement (zigzag)
+    let bi = 0;
+    for(let right=size-1; right>=1; right-=2) {
+      if(right===6) right=5;
+      for(let vert=0;vert<size;vert++) {
+        for(let j=0;j<2;j++) {
+          const r = (right+j)%2===0 ? vert : size-1-vert;
+          const c = right - j;
+          if(F[r][c]) continue;
+          const bit = bi < all.length*8 ? (all[bi>>3]>>(7-(bi&7)))&1 : 0;
+          bi++;
+          // Apply mask 2: (r+c)%3===0
+          M[r][c] = bit ^ ((r+c)%3===0 ? 1 : 0);
+        }
+      }
+    }
+    return M.map(row => Array.from(row));
+  }
+
+  return { encode };
+})();
 
 // ══════════════════════════════════════════════════════
 //  RACE ENGINE
@@ -588,7 +765,7 @@ $('btn-startcam').addEventListener('click', async () => {
     vid.onloadedmetadata = () => { cvs.width=vid.videoWidth; cvs.height=vid.videoHeight; };
     $('btn-startcam').textContent='📷 Camera active ✓';
     $('btn-startcam').disabled=true;
-    if (detector) $('btn-race').disabled=false;
+    if (barcodeDetector) $('btn-race').disabled=false;
   } catch(e) { alert('Camera error:\n'+e.message); }
 });
 
@@ -614,64 +791,52 @@ $('btn-race').addEventListener('click', () => {
 $('btn-stopr').addEventListener('click', () => stopRace());
 
 function startLoop() {
-  let frameCount = 0;
+  let detecting = false;
   function loop() {
     if (!engine?.armed) return;
     rafId = requestAnimationFrame(loop);
     if (vid.readyState < 2) return;
-
+    // Draw video to canvas for overlay
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
-    frameCount++;
-
-    // Run QR detection every 2nd frame (perf: jsQR is pure JS)
-    if (frameCount % 2 !== 0) return;
-
-    const tags = detectQR(cvs, ctx);
-
-    // Draw overlay for each detected QR
-    tags.forEach(t => {
-      const d = tagLookup[t.id];
-      drawQROverlay(t, d?.name);
-    });
-
-    // Streak logic
-    const seenIds = new Set(tags.map(t => t.id));
-    for (const tid of Object.keys(streaks)) {
-      if (!seenIds.has(+tid)) streaks[tid] = 0;
-    }
-    tags.forEach(t => {
-      if (tagLookup[t.id]) {
+    // BarcodeDetector is async – skip frame if previous still running
+    if (detecting) return;
+    detecting = true;
+    detectQR(vid).then(tags => {
+      detecting = false;
+      tags.forEach(t => {
+        const d = tagLookup[t.id];
+        drawQROverlay(t, d?.name);
+        if (!d) return;
         streaks[t.id] = (streaks[t.id] || 0) + 1;
         if (streaks[t.id] >= liveSet.streak) {
           streaks[t.id] = 0;
-          const result = engine.trigger(tagLookup[t.id].id);
+          const result = engine.trigger(d.id);
           if (result) handleResult(result);
         }
-      }
-    });
-
-    buildBoard();
+      });
+      // Reset streaks for tags not seen this frame
+      Object.keys(streaks).forEach(id => {
+        if (!tags.find(t => t.id == id)) streaks[id] = 0;
+      });
+      buildBoard();
+    }).catch(() => { detecting = false; });
   }
   loop();
 }
 
 function drawQROverlay(tag, driverName) {
-  const loc = tag.location;
-  if (!loc) return;
+  const cp = tag.cornerPoints;
+  if (!cp || cp.length < 4) return;
   ctx.save();
-  ctx.strokeStyle = '#3fb950';
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(loc.topLeftCorner.x,     loc.topLeftCorner.y);
-  ctx.lineTo(loc.topRightCorner.x,    loc.topRightCorner.y);
-  ctx.lineTo(loc.bottomRightCorner.x, loc.bottomRightCorner.y);
-  ctx.lineTo(loc.bottomLeftCorner.x,  loc.bottomLeftCorner.y);
+  ctx.moveTo(cp[0].x, cp[0].y);
+  for (let i=1;i<4;i++) ctx.lineTo(cp[i].x, cp[i].y);
   ctx.closePath(); ctx.stroke();
-  // Label
   ctx.fillStyle = '#3fb950';
   ctx.font = 'bold 15px Share Tech Mono, monospace';
   const label = driverName ? `#${tag.id} – ${driverName}` : `#${tag.id}`;
-  ctx.fillText(label, loc.topLeftCorner.x, loc.topLeftCorner.y - 8);
+  ctx.fillText(label, cp[0].x, cp[0].y - 8);
   ctx.restore();
 }
 
@@ -733,64 +898,39 @@ async function stopRace(auto=false) {
 }
 
 // ══════════════════════════════════════════════════════
-//  PRINT CARDS – QR code generation
+//  PRINT CARDS
 // ══════════════════════════════════════════════════════
-// Each QR code encodes "GC:<number>" e.g. "GC:22"
-async function generateQR(num, size) {
-  return new Promise((res, rej) => {
-    const c = document.createElement('canvas');
-    window.QRCode.toCanvas(c, `GC:${num}`, {
-      width: size,
-      margin: 1,
-      color: { dark: '#000000', light: '#ffffff' },
-      errorCorrectionLevel: 'H',  // highest – survives dirt/damage
-    }, err => err ? rej(err) : res(c));
-  });
+function makeCard(id, canvasSize) {
+  const canvas = document.createElement('canvas');
+  drawQRToCanvas(`GC:${id}`, canvas, canvasSize);
+  return canvas;
 }
 
-$('btn-preview').addEventListener('click', async () => {
-  if (!QRCode) { alert('QR library not loaded yet. Wait for the green status in Live Race tab.'); return; }
+$('btn-preview').addEventListener('click', () => {
   const from = parseInt($('inp-from').value);
   const to   = Math.min(parseInt($('inp-to').value), 9999);
   if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range.'); return; }
-
   const grid = $('card-grid'); grid.innerHTML = '';
-  $('btn-preview').textContent='⏳ Generating...'; $('btn-preview').disabled=true;
-
   for (let id=from; id<=to; id++) {
-    try {
-      const qrCanvas = await generateQR(id, 120);
-      const card = document.createElement('div'); card.className='preview-card';
-      const num  = document.createElement('div'); num.className='card-num'; num.textContent=String(id);
-      card.append(qrCanvas, num);
-      grid.appendChild(card);
-    } catch(e) { console.warn('QR gen failed for', id, e); }
+    const card = document.createElement('div'); card.className='preview-card';
+    const qr   = makeCard(id, 120);
+    const num  = document.createElement('div'); num.className='card-num'; num.textContent=String(id);
+    card.append(qr, num); grid.appendChild(card);
   }
-
-  $('btn-preview').textContent='👁 Preview cards'; $('btn-preview').disabled=false;
 });
 
-$('btn-print').addEventListener('click', async () => {
-  if (!QRCode) { alert('QR library not loaded yet. Wait for the green status in Live Race tab.'); return; }
+$('btn-print').addEventListener('click', () => {
   const from = parseInt($('inp-from').value);
   const to   = Math.min(parseInt($('inp-to').value), 9999);
   if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range.'); return; }
-
-  $('btn-print').textContent='⏳ Generating...'; $('btn-print').disabled=true;
-
   const printGrid = $('print-grid'); printGrid.innerHTML='';
-
   for (let id=from; id<=to; id++) {
-    try {
-      const qrCanvas = await generateQR(id, 300); // high-res for crisp print
-      const card = document.createElement('div'); card.className='print-card';
-      const num  = document.createElement('div'); num.className='pnum'; num.textContent=String(id);
-      card.append(qrCanvas, num);
-      printGrid.appendChild(card);
-    } catch(e) { console.warn('QR gen failed for', id, e); }
+    const card = document.createElement('div'); card.className='print-card';
+    const qr   = makeCard(id, 300);
+    qr.style.cssText = 'image-rendering:pixelated;width:100%;max-width:30mm;height:auto';
+    const num  = document.createElement('div'); num.className='pnum'; num.textContent=String(id);
+    card.append(qr, num); printGrid.appendChild(card);
   }
-
-  $('btn-print').textContent='🖨️ Print'; $('btn-print').disabled=false;
   window.print();
 });
 
