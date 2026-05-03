@@ -2,7 +2,7 @@
 
 Made by Jonathan Wastring
 
-Live at: `https://YOUR-USERNAME.github.io/gatecam`
+Live at: `https://jaxzo84.github.io/gatecam`
 
 ---
 
@@ -15,7 +15,7 @@ Live at: `https://YOUR-USERNAME.github.io/gatecam`
 ### 3. Enable GitHub Pages
 Settings → Pages → Source: **Deploy from branch** → **main** → **/ (root)**
 
-Done. Your timing system is live at `https://your-username.github.io/gatecam`
+Done. Your timing system is live at `https://jaxzo84.github.io/gatecam`
 
 ---
 
