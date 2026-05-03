@@ -7,11 +7,19 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Share+Tech+Mono&family=Barlow:wght@400;500;600&display=swap');
 :root{
-  --bg:#0a0c0f;--bg2:#111418;--bg3:#1a1e24;--bg4:#222830;
-  --border:#2a3040;--green:#00e87a;--green2:#00b85e;--green3:#003d20;
-  --amber:#ffb400;--red:#ff3b3b;--blue:#3a8fff;
-  --text:#c8d4e0;--muted:#5a6880;--r:6px;
-  --glow:0 0 14px rgba(0,232,122,.3);
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--bg4:#2d333b;
+  --border:#373e47;--green:#3fb950;--green2:#2ea043;--green3:#1a4a2a;
+  --amber:#e3b341;--red:#f85149;--blue:#58a6ff;
+  --text:#f0f6fc;--muted:#8b949e;--dim:#6e7681;--r:6px;
+  --glow:0 0 14px rgba(63,185,80,.35);
+}
+/* Light theme override */
+body.light{
+  --bg:#f6f8fa;--bg2:#ffffff;--bg3:#f6f8fa;--bg4:#eaeef2;
+  --border:#d0d7de;--green:#1a7f37;--green2:#1a7f37;--green3:#d1f8d9;
+  --amber:#9a6700;--red:#cf222e;--blue:#0969da;
+  --text:#1f2328;--muted:#656d76;--dim:#818b98;
+  --glow:0 0 8px rgba(26,127,55,.2);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
@@ -146,6 +154,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
     <button class="tab"    data-tab="r">📊 Results</button>
   </div>
   <span id="made-by">Made by Jonathan Wastring</span>
+  <button id="btn-theme" style="margin:auto 10px auto 0;padding:5px 10px;font-size:13px" title="Toggle light/dark">🌙</button>
 </div>
 
 <!-- Print sheet (hidden except on print) -->
@@ -262,7 +271,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button id="btn-preview" class="go">👁 Preview cards</button>
       <button id="btn-print" class="go">🖨️ Print</button>
     </div>
-    <p class="info" style="margin-top:8px">Loading tag images requires internet access (fetched from AprilRobotics GitHub).</p>
+    <p class="info" style="margin-top:8px">QR codes are generated locally – no internet needed after the page has loaded.</p>
   </div>
   <div id="card-grid"></div>
 </div>
@@ -335,67 +344,67 @@ document.querySelectorAll('.tab').forEach(btn => {
 });
 
 // ══════════════════════════════════════════════════════
-//  APRILTAG DETECTOR
+//  THEME TOGGLE
 // ══════════════════════════════════════════════════════
-let detector = null;
+const savedTheme = localStorage.getItem('gc_theme') || 'dark';
+if (savedTheme === 'light') { document.body.classList.add('light'); $('btn-theme').textContent='☀️'; }
+$('btn-theme').addEventListener('click', () => {
+  const isLight = document.body.classList.toggle('light');
+  $('btn-theme').textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('gc_theme', isLight ? 'light' : 'dark');
+});
 
-async function loadDetector() {
+// ══════════════════════════════════════════════════════
+//  QR DETECTOR (jsQR) + GENERATOR (qrcode)
+// ══════════════════════════════════════════════════════
+let jsQR = null;
+let QRCode = null;
+
+async function loadLibraries() {
   const st = $('wasm-status');
-  st.textContent = '⏳ Loading AprilTag detector...';
+  st.textContent = '⏳ Loading QR detector...';
   st.className = 'ws-loading';
-
-  // Try loading apriltag-wasm from unpkg CDN
-  // Falls back to local libs/ if available
-  const sources = [
-    'libs/apriltag_wasm.js',
-    'https://unpkg.com/apriltag-wasm@1.0.3/dist/apriltag_wasm.js',
-  ];
-
-  for (const src of sources) {
-    try {
-      await loadScript(src);
-      // The library exposes window.AprilTag or window.Apriltag
-      const factory = window.AprilTag || window.Apriltag || window.apriltag_wasm;
-      if (!factory) continue;
-      const locateFile = src.startsWith('libs/')
-        ? f => `libs/${f}`
-        : f => `https://unpkg.com/apriltag-wasm@1.0.3/dist/${f}`;
-      detector = await factory({ locateFile });
-      st.textContent = '✅ AprilTag detector ready';
-      st.className = 'ws-ok';
-      $('btn-race').disabled = !liveStream;
-      return;
-    } catch(e) { /* try next */ }
+  try {
+    // jsQR – QR code detector from camera feed
+    await loadScript('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js');
+    jsQR = window.jsQR;
+    // qrcode – QR code generator for print cards
+    await loadScript('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js');
+    QRCode = window.QRCode;
+    st.textContent = '✅ QR detector ready';
+    st.className = 'ws-ok';
+    if (liveStream) $('btn-race').disabled = false;
+  } catch(e) {
+    st.textContent = '❌ Could not load QR library. Check internet connection.';
+    st.className = 'ws-err';
   }
-
-  st.textContent = '❌ Could not load AprilTag detector. See README for setup.';
-  st.className = 'ws-err';
 }
 
 function loadScript(src) {
   return new Promise((res, rej) => {
-    const s = mk('script'); s.src = src;
-    s.onload = res; s.onerror = rej;
+    // avoid double-loading
+    if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = rej;
     document.head.appendChild(s);
   });
 }
 
-// Process a video frame through the detector
-// Returns array of {id, center, corners}
-function detectTags(canvas, ctx) {
-  if (!detector) return [];
+// Detect QR codes in current canvas frame
+// Returns array of {id (number), data (string)}
+function detectQR(canvas, ctx) {
+  if (!jsQR) return [];
   try {
     const W = canvas.width, H = canvas.height;
     const imgData = ctx.getImageData(0, 0, W, H);
-    // Convert RGBA → grayscale
-    const gray = new Uint8ClampedArray(W * H);
-    const d = imgData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      gray[i>>2] = (d[i] * 77 + d[i+1] * 150 + d[i+2] * 29) >> 8;
-    }
-    const results = detector.detect(gray, W, H);
-    return results || [];
-  } catch(e) { return []; }
+    const code = jsQR(imgData.data, W, H, { inversionAttempts: 'dontInvert' });
+    if (!code) return [];
+    // We encode driver number as "GC:22" – parse it
+    const m = code.data.match(/^GC:(\d+)$/);
+    if (!m) return [];
+    const id = parseInt(m[1]);
+    return [{ id, location: code.location }];
+  } catch { return []; }
 }
 
 // ══════════════════════════════════════════════════════
@@ -605,24 +614,28 @@ $('btn-race').addEventListener('click', () => {
 $('btn-stopr').addEventListener('click', () => stopRace());
 
 function startLoop() {
+  let frameCount = 0;
   function loop() {
     if (!engine?.armed) return;
     rafId = requestAnimationFrame(loop);
     if (vid.readyState < 2) return;
 
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
-    const tags = detectTags(cvs, ctx);
+    frameCount++;
 
-    // Draw overlay for each detected tag
+    // Run QR detection every 2nd frame (perf: jsQR is pure JS)
+    if (frameCount % 2 !== 0) return;
+
+    const tags = detectQR(cvs, ctx);
+
+    // Draw overlay for each detected QR
     tags.forEach(t => {
       const d = tagLookup[t.id];
-      drawTagOverlay(t, d?.name);
+      drawQROverlay(t, d?.name);
     });
 
-    // Update streaks
+    // Streak logic
     const seenIds = new Set(tags.map(t => t.id));
-
-    // Increment streaks for seen tags, reset others
     for (const tid of Object.keys(streaks)) {
       if (!seenIds.has(+tid)) streaks[tid] = 0;
     }
@@ -642,20 +655,23 @@ function startLoop() {
   loop();
 }
 
-function drawTagOverlay(tag, driverName) {
-  if (!tag.corners || tag.corners.length < 4) return;
+function drawQROverlay(tag, driverName) {
+  const loc = tag.location;
+  if (!loc) return;
   ctx.save();
-  ctx.strokeStyle = '#00e87a';
+  ctx.strokeStyle = '#3fb950';
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(tag.corners[0].x, tag.corners[0].y);
-  for (let i=1;i<4;i++) ctx.lineTo(tag.corners[i].x, tag.corners[i].y);
+  ctx.moveTo(loc.topLeftCorner.x,     loc.topLeftCorner.y);
+  ctx.lineTo(loc.topRightCorner.x,    loc.topRightCorner.y);
+  ctx.lineTo(loc.bottomRightCorner.x, loc.bottomRightCorner.y);
+  ctx.lineTo(loc.bottomLeftCorner.x,  loc.bottomLeftCorner.y);
   ctx.closePath(); ctx.stroke();
-  // Tag ID label
-  ctx.fillStyle = '#00e87a';
-  ctx.font = 'bold 16px Share Tech Mono, monospace';
-  const label = driverName ? `#${tag.id} ${driverName}` : `#${tag.id}`;
-  ctx.fillText(label, tag.center.x - 30, tag.center.y - 10);
+  // Label
+  ctx.fillStyle = '#3fb950';
+  ctx.font = 'bold 15px Share Tech Mono, monospace';
+  const label = driverName ? `#${tag.id} – ${driverName}` : `#${tag.id}`;
+  ctx.fillText(label, loc.topLeftCorner.x, loc.topLeftCorner.y - 8);
   ctx.restore();
 }
 
@@ -717,75 +733,61 @@ async function stopRace(auto=false) {
 }
 
 // ══════════════════════════════════════════════════════
-//  PRINT CARDS TAB
+//  PRINT CARDS – QR code generation
 // ══════════════════════════════════════════════════════
-// Tag images fetched from AprilRobotics GitHub
-// tag36h11: tag36_11_NNNNN.png  (5-digit zero-padded, starts at 00000)
-function tagImgUrl(id) {
-  const n = String(id).padStart(5,'0');
-  return `https://raw.githubusercontent.com/AprilRobotics/apriltag-imgs/master/tag36_11/tag36_11_${n}.png`;
-}
-
-// Render a single tag onto a canvas at requested size
-function renderTag(img, size) {
-  const c = mk('canvas'); c.width=size; c.height=size;
-  const cx = c.getContext('2d');
-  cx.imageSmoothingEnabled = false; // pixelated/crisp
-  cx.drawImage(img, 0, 0, size, size);
-  return c;
-}
-
-async function loadTagImage(id) {
+// Each QR code encodes "GC:<number>" e.g. "GC:22"
+async function generateQR(num, size) {
   return new Promise((res, rej) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => res(img);
-    img.onerror = rej;
-    img.src = tagImgUrl(id);
+    const c = document.createElement('canvas');
+    window.QRCode.toCanvas(c, `GC:${num}`, {
+      width: size,
+      margin: 1,
+      color: { dark: '#000000', light: '#ffffff' },
+      errorCorrectionLevel: 'H',  // highest – survives dirt/damage
+    }, err => err ? rej(err) : res(c));
   });
 }
 
 $('btn-preview').addEventListener('click', async () => {
+  if (!QRCode) { alert('QR library not loaded yet. Wait for the green status in Live Race tab.'); return; }
   const from = parseInt($('inp-from').value);
-  const to   = Math.min(parseInt($('inp-to').value), 587);
-  if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range (1–587).'); return; }
+  const to   = Math.min(parseInt($('inp-to').value), 9999);
+  if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range.'); return; }
 
   const grid = $('card-grid'); grid.innerHTML = '';
-  $('btn-preview').textContent='⏳ Loading...'; $('btn-preview').disabled=true;
+  $('btn-preview').textContent='⏳ Generating...'; $('btn-preview').disabled=true;
 
   for (let id=from; id<=to; id++) {
     try {
-      const img = await loadTagImage(id);
-      const card = mk('div',{className:'preview-card'});
-      const tagCanvas = renderTag(img, 120);
-      const num = mk('div',{className:'card-num', textContent:String(id)});
-      card.append(tagCanvas, num);
+      const qrCanvas = await generateQR(id, 120);
+      const card = document.createElement('div'); card.className='preview-card';
+      const num  = document.createElement('div'); num.className='card-num'; num.textContent=String(id);
+      card.append(qrCanvas, num);
       grid.appendChild(card);
-    } catch { /* skip failed */ }
+    } catch(e) { console.warn('QR gen failed for', id, e); }
   }
 
   $('btn-preview').textContent='👁 Preview cards'; $('btn-preview').disabled=false;
 });
 
 $('btn-print').addEventListener('click', async () => {
+  if (!QRCode) { alert('QR library not loaded yet. Wait for the green status in Live Race tab.'); return; }
   const from = parseInt($('inp-from').value);
-  const to   = Math.min(parseInt($('inp-to').value), 587);
-  if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range (1–587).'); return; }
+  const to   = Math.min(parseInt($('inp-to').value), 9999);
+  if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range.'); return; }
 
-  $('btn-print').textContent='⏳ Preparing...'; $('btn-print').disabled=true;
+  $('btn-print').textContent='⏳ Generating...'; $('btn-print').disabled=true;
 
   const printGrid = $('print-grid'); printGrid.innerHTML='';
 
   for (let id=from; id<=to; id++) {
     try {
-      const img  = await loadTagImage(id);
-      const card = mk('div',{className:'print-card'});
-      const tagC = renderTag(img, 200); // high-res for print
-      tagC.style.cssText='image-rendering:pixelated;width:100%;max-width:28mm;height:auto';
-      const num = mk('div',{className:'pnum', textContent:String(id)});
-      card.append(tagC, num);
+      const qrCanvas = await generateQR(id, 300); // high-res for crisp print
+      const card = document.createElement('div'); card.className='print-card';
+      const num  = document.createElement('div'); num.className='pnum'; num.textContent=String(id);
+      card.append(qrCanvas, num);
       printGrid.appendChild(card);
-    } catch { /* skip */ }
+    } catch(e) { console.warn('QR gen failed for', id, e); }
   }
 
   $('btn-print').textContent='🖨️ Print'; $('btn-print').disabled=false;
@@ -884,7 +886,7 @@ $('btn-expday').addEventListener('click', ()=>{
 // ══════════════════════════════════════════════════════
 driversLoad();
 setupRefresh();
-loadDetector();
+loadLibraries();
 </script>
 </body>
 </html>
