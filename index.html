@@ -110,20 +110,31 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
 .preview-card .card-num{font-family:'Share Tech Mono',monospace;font-size:18px;color:#000;font-weight:bold;line-height:1}
 
 /* Print styles */
+@page{size:A4 portrait;margin:8mm}
 @media print{
-  body{background:#fff!important}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body,html{background:#fff!important;height:auto!important;overflow:visible!important}
   body::before{display:none}
   #hdr,.no-print{display:none!important}
-  #panels{position:static;overflow:visible}
-  .panel{display:none!important}
-  #print-sheet{display:block!important;position:static}
-  #print-sheet{background:#fff;padding:0;margin:0}
+  #panels{display:none!important}
+  #print-sheet{display:block!important}
 }
 #print-sheet{display:none}
-.print-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4mm;padding:8mm}
-.print-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2mm;border:0.5mm solid #ccc;border-radius:2mm;padding:3mm;background:#fff;aspect-ratio:1;page-break-inside:avoid}
-.print-card canvas{image-rendering:pixelated;width:100%;max-width:28mm;height:auto}
-.print-card .pnum{font-family:'Courier New',monospace;font-size:22pt;font-weight:900;color:#000;line-height:1;text-align:center}
+.print-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:3mm;
+  width:100%;
+}
+.print-card{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1.5mm;border:0.4mm solid #bbb;border-radius:1.5mm;
+  padding:2.5mm;background:#fff;
+  page-break-inside:avoid;break-inside:avoid;
+  aspect-ratio:1;
+}
+.print-card canvas{image-rendering:pixelated;width:78%;height:auto;display:block}
+.print-card .pnum{font-family:'Courier New',monospace;font-size:16pt;font-weight:900;color:#000;line-height:1;text-align:center}
 
 /* ── Results tab ── */
 #r-panel{flex-direction:column}
@@ -355,50 +366,60 @@ $('btn-theme').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════════════════
-//  QR DETECTOR – browser BarcodeDetector (no CDN needed)
+//  QR DETECTOR – jsQR (loaded from same repo, no CDN)
 // ══════════════════════════════════════════════════════
-let barcodeDetector = null;
+let jsQRLib = null;
 
 async function loadLibraries() {
   const st = $('wasm-status');
-  st.textContent = '⏳ Checking QR support...';
+  st.textContent = '⏳ Loading QR detector...';
   st.className = 'ws-loading';
 
-  if (!('BarcodeDetector' in window)) {
-    st.textContent = '❌ BarcodeDetector not supported. Use Chrome or Edge.';
+  // Try local file first (committed to repo), then CDN fallback
+  const sources = ['jsqr.min.js', 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'];
+  for (const src of sources) {
+    try {
+      await loadScript(src);
+      if (window.jsQR) { jsQRLib = window.jsQR; break; }
+    } catch { /* try next */ }
+  }
+
+  if (!jsQRLib) {
+    st.innerHTML = '❌ jsqr.min.js not found. <a href="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" target="_blank" style="color:#58a6ff">Download jsQR</a> and add it to your repo as <b>jsqr.min.js</b>.';
     st.className = 'ws-err';
     return;
   }
 
-  try {
-    const formats = await BarcodeDetector.getSupportedFormats();
-    if (!formats.includes('qr_code')) {
-      st.textContent = '❌ QR code format not supported in this browser.';
-      st.className = 'ws-err';
-      return;
-    }
-    barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
-    st.textContent = '✅ QR detector ready  (built-in, no internet needed)';
-    st.className = 'ws-ok';
-    if (liveStream) $('btn-race').disabled = false;
-  } catch(e) {
-    st.textContent = '❌ QR detector error: ' + e.message;
-    st.className = 'ws-err';
-  }
+  st.textContent = '✅ QR detector ready';
+  st.className = 'ws-ok';
+  if (liveStream) $('btn-race').disabled = false;
 }
 
-// Detect QR in current video frame via BarcodeDetector
-async function detectQR(videoEl) {
-  if (!barcodeDetector || videoEl.readyState < 2) return [];
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+// Detect QR in current canvas frame
+function detectQR(canvas, ctx) {
+  if (!jsQRLib) return [];
   try {
-    const codes = await barcodeDetector.detect(videoEl);
-    return codes
-      .map(c => {
-        const m = c.rawValue.match(/^GC:(\d+)$/);
-        if (!m) return null;
-        return { id: parseInt(m[1]), boundingBox: c.boundingBox, cornerPoints: c.cornerPoints };
-      })
-      .filter(Boolean);
+    const W = canvas.width, H = canvas.height;
+    const img = ctx.getImageData(0, 0, W, H);
+    const code = jsQRLib(img.data, W, H, { inversionAttempts: 'dontInvert' });
+    if (!code) return [];
+    const m = code.data.match(/^GC:(\d+)$/);
+    if (!m) return [];
+    return [{ id: parseInt(m[1]), cornerPoints: [
+      code.location.topLeftCorner,
+      code.location.topRightCorner,
+      code.location.bottomRightCorner,
+      code.location.bottomLeftCorner,
+    ]}];
   } catch { return []; }
 }
 
@@ -765,7 +786,7 @@ $('btn-startcam').addEventListener('click', async () => {
     vid.onloadedmetadata = () => { cvs.width=vid.videoWidth; cvs.height=vid.videoHeight; };
     $('btn-startcam').textContent='📷 Camera active ✓';
     $('btn-startcam').disabled=true;
-    if (barcodeDetector) $('btn-race').disabled=false;
+    if (jsQRLib) $('btn-race').disabled=false;
   } catch(e) { alert('Camera error:\n'+e.message); }
 });
 
@@ -791,35 +812,37 @@ $('btn-race').addEventListener('click', () => {
 $('btn-stopr').addEventListener('click', () => stopRace());
 
 function startLoop() {
-  let detecting = false;
+  let frameCount = 0;
   function loop() {
     if (!engine?.armed) return;
     rafId = requestAnimationFrame(loop);
     if (vid.readyState < 2) return;
-    // Draw video to canvas for overlay
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
-    // BarcodeDetector is async – skip frame if previous still running
-    if (detecting) return;
-    detecting = true;
-    detectQR(vid).then(tags => {
-      detecting = false;
-      tags.forEach(t => {
-        const d = tagLookup[t.id];
-        drawQROverlay(t, d?.name);
-        if (!d) return;
-        streaks[t.id] = (streaks[t.id] || 0) + 1;
-        if (streaks[t.id] >= liveSet.streak) {
-          streaks[t.id] = 0;
-          const result = engine.trigger(d.id);
-          if (result) handleResult(result);
-        }
-      });
-      // Reset streaks for tags not seen this frame
-      Object.keys(streaks).forEach(id => {
-        if (!tags.find(t => t.id == id)) streaks[id] = 0;
-      });
-      buildBoard();
-    }).catch(() => { detecting = false; });
+
+    // jsQR är synkron – kör var 3:e frame för performance
+    frameCount++;
+    if (frameCount % 3 !== 0) return;
+
+    const tags = detectQR(cvs, ctx);
+
+    tags.forEach(t => {
+      const d = tagLookup[t.id];
+      drawQROverlay(t, d?.name);
+      if (!d) return;
+      streaks[t.id] = (streaks[t.id] || 0) + 1;
+      if (streaks[t.id] >= liveSet.streak) {
+        streaks[t.id] = 0;
+        const result = engine.trigger(d.id);
+        if (result) handleResult(result);
+      }
+    });
+
+    // Reset streaks för tags som inte syntes denna frame
+    Object.keys(streaks).forEach(id => {
+      if (!tags.find(t => t.id == id)) streaks[id] = 0;
+    });
+
+    buildBoard();
   }
   loop();
 }
