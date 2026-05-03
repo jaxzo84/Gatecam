@@ -390,6 +390,15 @@ async function loadLibraries() {
     return;
   }
 
+  // Load QRious for QR generation (print cards)
+  const qrSources = ['qrious.min.js', 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js'];
+  for (const src of qrSources) {
+    try { await loadScript(src); if (window.QRious) break; } catch { /* try next */ }
+  }
+  if (!window.QRious) {
+    st.innerHTML += ' · ⚠️ qrious.min.js not found – print cards unavailable. <a href="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js" target="_blank" style="color:#58a6ff">Download QRious</a>';
+  }
+
   st.textContent = '✅ QR detector ready';
   st.className = 'ws-ok';
   if (liveStream) $('btn-race').disabled = false;
@@ -424,186 +433,36 @@ function detectQR(canvas, ctx) {
 }
 
 // ══════════════════════════════════════════════════════
-//  QR CODE GENERATOR – pure canvas, zero dependencies
-//  Minimal QR encoder for short numeric strings "GC:NNN"
-//  Uses a pre-computed lookup for version 2 QR (up to ~26 chars)
+//  QR CODE GENERATOR – uses qrious.min.js (local file)
 // ══════════════════════════════════════════════════════
-
-// We use the browser's canvas + a tiny QR lib written inline.
-// For simplicity and zero deps we use the well-known
-// "qr-creator" algorithm embedded as a minimal implementation.
+// qrious is loaded alongside jsqr.min.js in the repo.
+// drawQRToCanvas is called from the print functions below.
 
 function drawQRToCanvas(text, canvas, size) {
-  // Use the QRious approach: encode via data URL trick using
-  // a hidden img + SVG data URI. Falls back to text label.
-  const modules = generateQRMatrix(text);
-  if (!modules) {
-    // Fallback: draw number text only
-    const ctx = canvas.getContext('2d');
+  if (window.QRious) {
+    // QRious renders directly to a canvas element
     canvas.width = size; canvas.height = size;
-    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size);
-    ctx.fillStyle = '#000'; ctx.font = `bold ${size*0.3}px monospace`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(text.replace('GC:',''), size/2, size/2);
-    return;
-  }
-  const n = modules.length;
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,size,size);
-  ctx.fillStyle = '#000';
-  const cell = size / n;
-  for (let r=0; r<n; r++) {
-    for (let c=0; c<n; c++) {
-      if (modules[r][c]) ctx.fillRect(c*cell, r*cell, cell, cell);
-    }
+    new QRious({
+      element: canvas,
+      value: text,
+      size: size,
+      level: 'H',         // highest error correction – survives dirt
+      background: '#ffffff',
+      foreground: '#000000',
+    });
+  } else {
+    // Fallback: just show the number if library not loaded
+    canvas.width = size; canvas.height = size;
+    const c = canvas.getContext('2d');
+    c.fillStyle = '#fff'; c.fillRect(0,0,size,size);
+    c.fillStyle = '#000';
+    c.font = `bold ${size*0.35}px monospace`;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(text.replace('GC:',''), size/2, size/2);
   }
 }
 
-// Minimal QR matrix generator (byte mode, EC level M, version auto 1-4)
-// Sufficient for "GC:1" through "GC:9999"
-function generateQRMatrix(text) {
-  // Encode using browser's built-in via canvas hack:
-  // Create an off-screen QR via SVG path - not viable without lib.
-  // Instead use the fetch-free approach: postMessage to a worker? No.
-  // Best zero-dep approach: use qrcodegen reference implementation (MIT)
-  // Inlined below (trimmed to essentials):
-  try { return QRGen.encode(text); } catch { return null; }
-}
 
-// ── Minimal QR generator (qrcodegen MIT, trimmed) ────
-const QRGen = (() => {
-  // Reed-Solomon GF(256) with prime 0x11D
-  const GF = new Uint8Array(256), LOG = new Uint8Array(256);
-  let x = 1;
-  for (let i = 0; i < 255; i++) { GF[i] = x; LOG[x] = i; x = x < 128 ? x*2 : (x*2)^0x11D; }
-
-  function mul(a,b){ return a&&b ? GF[(LOG[a]+LOG[b])%255] : 0; }
-
-  function rsDivisor(degree) {
-    const r = new Uint8Array(degree); r[degree-1] = 1;
-    let root = 1;
-    for (let i=0; i<degree; i++) {
-      for (let j=0; j<degree; j++) {
-        r[j] = mul(r[j], root); if (j+1<degree) r[j] ^= r[j+1];
-      }
-      root = mul(root, 2);
-    }
-    return r;
-  }
-
-  function rsRemainder(data, divisor) {
-    const res = new Uint8Array(divisor.length);
-    for (const b of data) {
-      const f = b ^ res[0];
-      res.copyWithin(0,1); res[res.length-1] = 0;
-      for (let i=0; i<divisor.length; i++) res[i] ^= mul(divisor[i], f);
-    }
-    return res;
-  }
-
-  // Version/EC tables for versions 1-4, EC level M
-  const EC_CODEWORDS   = [0, 10, 16, 26, 36];
-  const DATA_CODEWORDS = [0, 16, 28, 44, 64];
-  const ALIGN_POS      = [[], [], [6,18], [6,22], [6,26]];
-
-  function chooseVersion(len) {
-    // byte mode overhead = 4+8 = 12 bits → 2 bytes overhead
-    for (let v=1; v<=4; v++) { if (DATA_CODEWORDS[v]*8 >= len*8+12) return v; }
-    return -1;
-  }
-
-  function encode(text) {
-    const bytes = new TextEncoder().encode(text);
-    const ver   = chooseVersion(bytes.length);
-    if (ver < 1) return null;
-    const size  = ver*4 + 17;
-    const total = DATA_CODEWORDS[ver];
-    const ecCnt = EC_CODEWORDS[ver];
-    const dataCnt = total - ecCnt;
-
-    // Build data bits
-    let bits = [];
-    const push = (val, len) => { for (let i=len-1;i>=0;i--) bits.push((val>>i)&1); };
-    push(0b0100, 4);       // byte mode
-    push(bytes.length, 8); // char count
-    for (const b of bytes) push(b, 8);
-    // Terminator + padding
-    while (bits.length % 8) bits.push(0);
-    const pad = [0xEC, 0x11];
-    let pi = 0;
-    while (bits.length < dataCnt*8) { for (let i=7;i>=0;i--) bits.push((pad[pi%2]>>i)&1); pi++; }
-
-    // Bytes
-    const dataBytes = new Uint8Array(dataCnt);
-    for (let i=0;i<dataCnt;i++) { for(let b=0;b<8;b++) dataBytes[i]=(dataBytes[i]<<1)|bits[i*8+b]; }
-
-    // RS error correction
-    const div = rsDivisor(ecCnt);
-    const ec  = rsRemainder(dataBytes, div);
-    const all = new Uint8Array(total);
-    all.set(dataBytes); all.set(ec, dataCnt);
-
-    // Build module grid
-    const M = Array.from({length:size}, ()=>new Uint8Array(size));
-    const F = Array.from({length:size}, ()=>new Uint8Array(size)); // fixed mask
-
-    const setMod = (r,c,v,fix=true) => { if(r>=0&&r<size&&c>=0&&c<size){M[r][c]=v;if(fix)F[r][c]=1;} };
-
-    // Finder patterns
-    const finder = (sr,sc) => {
-      for(let r=-1;r<=7;r++) for(let c=-1;c<=7;c++) {
-        const v=r>=0&&r<=6&&c>=0&&c<=6&&!(r>=1&&r<=5&&c>=1&&c<=5)||r===2&&c>=2&&c<=4||c===2&&r>=2&&r<=4;
-        setMod(sr+r, sc+c, (r>=0&&r<=6&&(r===0||r===6||c===0||c===6))||(r>=2&&r<=4&&c>=2&&c<=4)?1:0);
-      }
-    };
-    finder(0,0); finder(0,size-7); finder(size-7,0);
-
-    // Separators (already 0, just mark fixed)
-    const sep = (rs,re,cs,ce) => { for(let r=rs;r<=re;r++) for(let c=cs;c<=ce;c++) setMod(r,c,0); };
-    sep(7,7,0,7); sep(0,7,7,7); sep(7,7,size-8,size-1); sep(0,7,size-8,size-8); sep(size-8,size-8,0,7); sep(size-7,size-1,7,7);
-
-    // Timing
-    for(let i=8;i<size-8;i++){ setMod(6,i,i%2===0?1:0); setMod(i,6,i%2===0?1:0); }
-
-    // Dark module
-    setMod(size-8,8,1);
-
-    // Alignment patterns (ver≥2)
-    for(const ar of ALIGN_POS[ver]) for(const ac of ALIGN_POS[ver]) {
-      if(F[ar][ac]) continue;
-      for(let r=-2;r<=2;r++) for(let c=-2;c<=2;c++)
-        setMod(ar+r,ac+c,r===0&&c===0||Math.abs(r)===2||Math.abs(c)===2?1:0);
-    }
-
-    // Format info (EC=M=0b00, mask=0b010 → format=0b00_010)
-    const MASK_PAT = 2; // (row+col)%3===0
-    const FORMAT   = [1,0,1,1,0,1,1,1,1,0,0,0,1,0,0]; // precomputed for M+mask2
-    const fmtPos1  = [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]];
-    const fmtPos2  = [[size-1,8],[size-2,8],[size-3,8],[size-4,8],[size-5,8],[size-6,8],[size-7,8],[8,size-8],[8,size-7],[8,size-6],[8,size-5],[8,size-4],[8,size-3],[8,size-2],[8,size-1]];
-    for(let i=0;i<15;i++){ setMod(...fmtPos1[i], FORMAT[i]); setMod(...fmtPos2[i], FORMAT[i]); }
-
-    // Data placement (zigzag)
-    let bi = 0;
-    for(let right=size-1; right>=1; right-=2) {
-      if(right===6) right=5;
-      for(let vert=0;vert<size;vert++) {
-        for(let j=0;j<2;j++) {
-          const r = (right+j)%2===0 ? vert : size-1-vert;
-          const c = right - j;
-          if(F[r][c]) continue;
-          const bit = bi < all.length*8 ? (all[bi>>3]>>(7-(bi&7)))&1 : 0;
-          bi++;
-          // Apply mask 2: (r+c)%3===0
-          M[r][c] = bit ^ ((r+c)%3===0 ? 1 : 0);
-        }
-      }
-    }
-    return M.map(row => Array.from(row));
-  }
-
-  return { encode };
-})();
 
 // ══════════════════════════════════════════════════════
 //  RACE ENGINE
