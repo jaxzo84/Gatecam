@@ -421,22 +421,25 @@ function detectQR(canvas, ctx) {
     const W = canvas.width, H = canvas.height;
     const img = ctx.getImageData(0, 0, W, H);
     const code = jsQRLib(img.data, W, H, { inversionAttempts: 'attemptBoth' });
-    // Show raw result in debug box
     const dbg = $('dbg-out');
-    if (dbg) dbg.textContent = code ? `RAW: "${code.data}"` : 'scanning...';
-    if (!code) return [];
-    const m = code.data.match(/^GC:(\d+)$/);
-    if (!m) {
-      if (dbg) dbg.textContent = `Found QR but wrong format: "${code.data}" (expected GC:NNN)`;
+    if (!code) {
+      if (dbg) dbg.textContent = 'jsQR running – no QR found in frame';
       return [];
     }
+    if (dbg) dbg.textContent = `RAW: "${code.data}"`;
+    const m = code.data.match(/^GC:(\d+)$/);
+    if (!m) return [];
     return [{ id: parseInt(m[1]), cornerPoints: [
       code.location.topLeftCorner,
       code.location.topRightCorner,
       code.location.bottomRightCorner,
       code.location.bottomLeftCorner,
     ]}];
-  } catch(e) { return []; }
+  } catch(e) {
+    const dbg = $('dbg-out');
+    if (dbg) dbg.textContent = 'jsQR error: ' + e.message;
+    return [];
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -653,6 +656,7 @@ $('btn-startcam').addEventListener('click', async () => {
     $('btn-startcam').textContent='📷 Camera active ✓';
     $('btn-startcam').disabled=true;
     if (jsQRLib) $('btn-race').disabled=false;
+    startCameraLoop();
   } catch(e) { alert('Camera error:\n'+e.message); }
 });
 
@@ -677,13 +681,13 @@ $('btn-race').addEventListener('click', () => {
 
 $('btn-stopr').addEventListener('click', () => stopRace());
 
-function startLoop() {
+// Kameraloop – kör alltid när kameran är igång
+function startCameraLoop() {
   function loop() {
-    if (!engine?.armed) return;
-    rafId = requestAnimationFrame(loop);
+    if (!liveStream) return;
+    requestAnimationFrame(loop);
     if (vid.readyState < 2) return;
 
-    // Skala ner till 640px bred för jsQR – snabbare och räcker gott
     const scale = Math.min(1, 640 / vid.videoWidth);
     cvs.width  = Math.round(vid.videoWidth  * scale);
     cvs.height = Math.round(vid.videoHeight * scale);
@@ -691,26 +695,29 @@ function startLoop() {
 
     const tags = detectQR(cvs, ctx);
 
-    tags.forEach(t => {
-      const d = tagLookup[t.id];
-      drawQROverlay(t, d?.name);
-      if (!d) return;
-      streaks[t.id] = (streaks[t.id] || 0) + 1;
-      if (streaks[t.id] >= liveSet.streak) {
-        streaks[t.id] = 0;
-        const result = engine.trigger(d.id);
-        if (result) handleResult(result);
-      }
-    });
-
-    Object.keys(streaks).forEach(id => {
-      if (!tags.find(t => t.id == id)) streaks[id] = 0;
-    });
-
-    buildBoard();
+    // Race-logik – bara om race är igång
+    if (engine?.armed) {
+      tags.forEach(t => {
+        const d = tagLookup[t.id];
+        drawQROverlay(t, d?.name);
+        if (!d) return;
+        streaks[t.id] = (streaks[t.id] || 0) + 1;
+        if (streaks[t.id] >= liveSet.streak) {
+          streaks[t.id] = 0;
+          const result = engine.trigger(d.id);
+          if (result) handleResult(result);
+        }
+      });
+      Object.keys(streaks).forEach(id => {
+        if (!tags.find(t => t.id == id)) streaks[id] = 0;
+      });
+      buildBoard();
+    }
   }
   loop();
 }
+
+function startLoop() { /* race start hanteras nu i startCameraLoop */ }
 
 function drawQROverlay(tag, driverName) {
   const cp = tag.cornerPoints;
