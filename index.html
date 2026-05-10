@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GateCam – RC Lap Timer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&family=Share+Tech+Mono&family=Barlow:wght@400;500;600&display=swap');
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--bg4:#2d333b;
+  --border:#373e47;--green:#3fb950;--green2:#2ea043;--green3:#1a4a2a;
+  --amber:#e3b341;--red:#f85149;--blue:#58a6ff;
+  --text:#f0f6fc;--muted:#8b949e;--dim:#6e7681;--r:6px;
+  --glow:0 0 14px rgba(63,185,80,.35);
+}
+/* Light theme override */
+body.light{
+  --bg:#f6f8fa;--bg2:#ffffff;--bg3:#f6f8fa;--bg4:#eaeef2;
+  --border:#d0d7de;--green:#1a7f37;--green2:#1a7f37;--green3:#d1f8d9;
+  --amber:#9a6700;--red:#cf222e;--blue:#0969da;
+  --text:#1f2328;--muted:#656d76;--dim:#818b98;
+  --glow:0 0 8px rgba(26,127,55,.2);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif;font-size:14px;display:flex;flex-direction:column}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px);pointer-events:none;z-index:9999}
+
+/* ── Header ── */
+#hdr{display:flex;align-items:stretch;background:var(--bg2);border-bottom:2px solid var(--green3);flex-shrink:0}
+.logo{display:flex;align-items:center;gap:10px;padding:0 16px;border-right:1px solid var(--border);white-space:nowrap}
+.logo-text{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:18px;color:var(--green);letter-spacing:.08em}
+.logo-sub{font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.tabs{display:flex;flex:1;gap:1px;padding:0 6px}
+.tab{padding:0 15px;background:none;border:none;color:var(--muted);cursor:pointer;font-family:'Barlow',sans-serif;font-size:13px;font-weight:600;letter-spacing:.03em;border-bottom:3px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap}
+.tab:hover{color:var(--text)}.tab.on{color:var(--green);border-bottom-color:var(--green)}
+#made-by{align-self:center;padding:0 14px;font-size:11px;color:var(--muted);font-style:italic;white-space:nowrap}
+
+/* ── Panels ── */
+#panels{flex:1;overflow:hidden;position:relative}
+.panel{display:none;position:absolute;inset:0;overflow-y:auto;padding:16px;flex-direction:column;gap:12px}
+.panel.on{display:flex}
+
+/* ── Cards / UI ── */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px}
+.stitle{font-family:'Rajdhani',sans-serif;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}
+button{padding:7px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-family:'Barlow',sans-serif;font-size:13px;font-weight:500;transition:background .15s,border-color .15s}
+button:hover{background:var(--bg4);border-color:#3a4560}
+button:disabled{opacity:.35;cursor:default}
+button.go{background:var(--green3);border-color:var(--green2);color:var(--green);font-weight:700}
+button.go:hover:not(:disabled){background:#005530;box-shadow:var(--glow)}
+button.danger{background:#2a0a0a;border-color:#5a1a1a;color:#ff8888}
+button.danger:hover{background:#3a1010}
+input,select{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:6px 10px;font-family:'Barlow',sans-serif;font-size:13px;outline:none;width:100%}
+input:focus,select:focus{border-color:var(--blue)}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+.frow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.frow>label{width:160px;flex-shrink:0;margin:0}
+.frow>input,.frow>select{flex:1}
+.hint{font-size:11px;color:var(--muted);white-space:nowrap}
+.btns{display:flex;gap:6px;flex-wrap:wrap}
+.info{font-size:12px;color:var(--muted);line-height:1.6}
+hr{border:none;border-top:1px solid var(--border);margin:6px 0}
+
+/* ── Drivers tab ── */
+#d-panel{flex-direction:row;overflow:hidden;padding:0}
+#d-list-pane{flex:1;display:flex;flex-direction:column;padding:16px;gap:10px;overflow:hidden;border-right:1px solid var(--border)}
+#d-form-pane{flex:0 0 300px;padding:16px;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
+#driver-list{list-style:none;display:flex;flex-direction:column;gap:3px;overflow-y:auto;flex:1}
+.di{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r);cursor:pointer;border:1px solid transparent;transition:background .1s}
+.di:hover{background:var(--bg3)}.di.sel{background:var(--bg3);border-color:var(--blue)}
+.di-num{font-family:'Share Tech Mono',monospace;font-size:22px;font-weight:400;color:var(--green);width:42px;text-align:center;flex-shrink:0}
+.di-name{flex:1;font-weight:600;font-size:14px}
+.di-unassigned{color:var(--muted);font-style:italic}
+
+/* ── Setup tab ── */
+#s-panel{flex-direction:row;gap:14px;overflow-y:auto}
+.s-col{display:flex;flex-direction:column;gap:12px;flex:1}
+#driver-checks{display:flex;flex-direction:column;gap:3px;max-height:300px;overflow-y:auto}
+.dck{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:4px}
+.dck:hover{background:var(--bg3)}
+.dck input[type=checkbox]{width:15px;height:15px;accent-color:var(--green);cursor:pointer}
+.dck label{margin:0;cursor:pointer;color:var(--text);font-size:13px;flex:1}
+.dck .tag-num{font-family:'Share Tech Mono',monospace;font-size:13px;color:var(--green)}
+
+/* ── Live tab ── */
+#l-panel{flex-direction:row;padding:0;overflow:hidden}
+#cam-pane{flex:1;display:flex;flex-direction:column;padding:12px;gap:8px;overflow:hidden}
+#race-pane{flex:0 0 330px;background:var(--bg2);border-left:1px solid var(--border);padding:14px;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
+#cam-wrap{flex:1;position:relative;background:#000;border-radius:var(--r);overflow:hidden;min-height:200px}
+#cam-video,#cam-canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#wasm-status{padding:6px 10px;border-radius:var(--r);font-size:12px;font-family:'Share Tech Mono',monospace;text-align:center}
+.ws-ok{background:#002a10;color:var(--green);border:1px solid var(--green3)}
+.ws-loading{background:#1a1400;color:var(--amber);border:1px solid #4a3a00}
+.ws-err{background:#2a0a0a;color:#ff8888;border:1px solid #5a1a1a}
+#clock{font-family:'Share Tech Mono',monospace;font-size:40px;color:var(--green);text-align:center;letter-spacing:.06em;text-shadow:var(--glow)}
+#lb{width:100%;border-collapse:collapse;font-size:12px}
+#lb th{text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+#lb td{padding:5px 6px;border-bottom:1px solid rgba(255,255,255,.03)}
+.c-done{color:var(--green)}.c-go{color:#fff}.c-wait{color:var(--muted)}
+#lap-log{font-family:'Share Tech Mono',monospace;font-size:11px;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.ll-start{color:var(--amber)}.ll-lap{color:var(--text)}.ll-done{color:var(--green)}
+
+/* ── Print tab ── */
+#p-panel{flex-direction:column}
+#card-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+.preview-card{background:#fff;border-radius:4px;padding:6px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;border:2px solid transparent;transition:border-color .15s}
+.preview-card:hover{border-color:var(--blue)}
+.preview-card canvas{image-rendering:pixelated}
+.preview-card .card-num{font-family:'Share Tech Mono',monospace;font-size:18px;color:#000;font-weight:bold;line-height:1}
+
+/* Print styles */
+@page{size:A4 portrait;margin:8mm}
+@media print{
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body,html{background:#fff!important;height:auto!important;overflow:visible!important}
+  body::before{display:none}
+  #hdr,.no-print{display:none!important}
+  #panels{display:none!important}
+  #print-sheet{display:block!important}
+}
+#print-sheet{display:none}
+.print-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:3mm;
+  width:100%;
+}
+.print-card{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:1.5mm;border:0.4mm solid #bbb;border-radius:1.5mm;
+  padding:2.5mm;background:#fff;
+  page-break-inside:avoid;break-inside:avoid;
+  aspect-ratio:1;
+}
+.print-card canvas{image-rendering:pixelated;width:78%;height:auto;display:block}
+.print-card .pnum{font-family:'Courier New',monospace;font-size:16pt;font-weight:900;color:#000;line-height:1;text-align:center}
+
+/* ── Results tab ── */
+#r-panel{flex-direction:column}
+.rcols{display:flex;gap:14px;align-items:flex-start}
+#history-list{list-style:none;display:flex;flex-direction:column;gap:3px;max-height:160px;overflow-y:auto}
+.hi{padding:7px 10px;border-radius:var(--r);cursor:pointer;border:1px solid transparent;font-size:13px}
+.hi:hover{background:var(--bg3)}.hi.sel{background:var(--bg3);border-color:var(--blue)}
+.rtable{width:100%;border-collapse:collapse;font-size:12px}
+.rtable th{text-align:left;padding:5px 7px;border-bottom:1px solid var(--border);color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.rtable td{padding:5px 7px;border-bottom:1px solid rgba(255,255,255,.03)}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2a3040;border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="hdr">
+  <div class="logo">
+    <span style="font-size:20px">🏁</span>
+    <div><div class="logo-text">GATECAM</div><div class="logo-sub">DataMatrix lap timing</div></div>
+  </div>
+  <div class="tabs">
+    <button class="tab on" data-tab="d">🚗 Drivers</button>
+    <button class="tab"    data-tab="s">⚙️ Race Setup</button>
+    <button class="tab"    data-tab="l">🏁 Live Race</button>
+    <button class="tab"    data-tab="p">🖨️ Print Cards</button>
+    <button class="tab"    data-tab="r">📊 Results</button>
+  </div>
+  <span id="made-by">Made by Jonathan Wastring</span>
+  <button id="btn-theme" style="margin:auto 10px auto 0;padding:5px 10px;font-size:13px" title="Toggle light/dark">🌙</button>
+</div>
+
+<!-- Print sheet (hidden except on print) -->
+<div id="print-sheet">
+  <div class="print-grid" id="print-grid"></div>
+</div>
+
+<div id="panels">
+
+<!-- ══ DRIVERS ══ -->
+<div class="panel on" id="d-panel">
+  <div id="d-list-pane">
+    <div class="stitle">Registered Drivers</div>
+    <ul id="driver-list"></ul>
+    <div class="btns" style="margin-top:auto;padding-top:10px">
+      <button id="btn-new">➕ New driver</button>
+      <button id="btn-del" class="danger" disabled>🗑 Delete</button>
+    </div>
+  </div>
+  <div id="d-form-pane">
+    <div class="stitle" id="form-ttl">Add driver</div>
+    <div class="card" style="display:flex;flex-direction:column;gap:10px">
+      <div><label>Name</label><input id="inp-name" placeholder="e.g. Arne Svensson"></div>
+      <div>
+        <label>Tag number (today's assignment)</label>
+        <input id="inp-tag" type="number" min="1" max="587" placeholder="1–587">
+        <span class="hint" style="margin-top:4px;display:block">Tag 0 = unassigned. Change between event days.</span>
+      </div>
+      <hr>
+      <div class="btns">
+        <button id="btn-save" class="go" style="flex:1">💾 Save</button>
+        <button id="btn-cancel">Cancel</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="stitle">Event Day Reset</div>
+      <p class="info" style="margin-bottom:10px">Clear all tag assignments at the start of a new event day. Drivers remain in the list.</p>
+      <button id="btn-reset-tags" class="danger">↺ Clear all tag assignments</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SETUP ══ -->
+<div class="panel" id="s-panel">
+  <div class="s-col">
+    <div class="card">
+      <div class="stitle">Race Settings</div>
+      <div class="frow"><label>Race title</label><input id="inp-title" placeholder="e.g. Heat 1 – RallyX"></div>
+      <div class="frow"><label>Debounce (sec)</label><input type="number" id="inp-db" value="5" min="1" max="120" step=".5" style="width:80px;flex:none"><span class="hint">min time between crossings</span></div>
+      <div class="frow"><label>Number of laps</label><input type="number" id="inp-laps" value="10" min="0" max="999" style="width:80px;flex:none"><span class="hint">0 = unlimited</span></div>
+      <div class="frow"><label>Show best</label><input type="number" id="inp-best" value="3" min="1" max="10" style="width:80px;flex:none"><span class="hint">fastest laps in results</span></div>
+    </div>
+    <div class="card">
+      <div class="stitle">Detection Settings</div>
+      <p class="info" style="margin-bottom:10px">Frames: how many consecutive frames a tag must appear before a lap is registered. Higher = more stable, slightly slower to react.</p>
+      <div class="frow"><label>Frames needed</label><input type="number" id="inp-streak" value="3" min="1" max="20" style="width:80px;flex:none"><span class="hint">consecutive frames</span></div>
+    </div>
+  </div>
+  <div class="s-col">
+    <div class="card" style="flex:1">
+      <div class="stitle">Drivers in This Heat</div>
+      <p class="info" style="margin-bottom:8px">Only drivers with an assigned tag number can be selected.</p>
+      <div class="btns" style="margin-bottom:8px">
+        <button id="btn-all">✅ Select all</button>
+        <button id="btn-none">☐ Select none</button>
+      </div>
+      <div id="driver-checks"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ LIVE RACE ══ -->
+<div class="panel" id="l-panel">
+  <div id="cam-pane">
+    <div id="wasm-status" class="ws-loading">⏳ Checking QR support...</div>
+    <div id="dbg-out" style="font-family:monospace;font-size:11px;color:#888;padding:4px 8px;background:#0a0a0a;border-radius:4px;min-height:20px">–</div>
+    <div id="cam-wrap">
+      <video id="cam-video" autoplay playsinline muted></video>
+      <canvas id="cam-canvas"></canvas>
+    </div>
+    <div class="btns">
+      <select id="sel-cam" style="flex:1;width:auto"></select>
+      <button id="btn-startcam">📷 Start camera</button>
+    </div>
+  </div>
+  <div id="race-pane">
+    <div id="clock">00:00.000</div>
+    <div class="btns">
+      <button id="btn-race" class="go" style="flex:1;font-size:15px;padding:10px" disabled>🏁 Start race!</button>
+      <button id="btn-stopr" disabled>⏹ Stop</button>
+    </div>
+    <div class="stitle">Leaderboard</div>
+    <table id="lb"><thead><tr id="lb-head"></tr></thead><tbody id="lb-body"></tbody></table>
+    <div class="stitle">Lap log</div>
+    <div id="lap-log"></div>
+  </div>
+</div>
+
+<!-- ══ PRINT ══ -->
+<div class="panel" id="p-panel">
+  <div class="card no-print">
+    <div class="stitle">Generate Print Sheet</div>
+    <p class="info" style="margin-bottom:10px">
+      Select which tag numbers to include. Cards are generated at print time.
+      Use <strong>matt lamination</strong> or no lamination to avoid glare under the camera.
+      Tag size on paper: approx 35×35 mm – crisp even when scaled up.
+    </p>
+    <div class="frow">
+      <label>Tags to generate</label>
+      <input type="number" id="inp-from" value="1" min="1" max="587" style="width:70px;flex:none">
+      <span class="hint">to</span>
+      <input type="number" id="inp-to" value="20" min="1" max="587" style="width:70px;flex:none">
+    </div>
+    <div class="btns" style="margin-top:6px">
+      <button id="btn-preview" class="go">👁 Preview cards</button>
+      <button id="btn-print" class="go">🖨️ Print</button>
+    </div>
+    <p class="info" style="margin-top:8px">DataMatrix codes are generated locally – no internet needed after the page has loaded. DataMatrix is faster to read than QR in motion.</p>
+  </div>
+  <div id="card-grid"></div>
+</div>
+
+<!-- ══ RESULTS ══ -->
+<div class="panel" id="r-panel">
+  <div class="rcols">
+    <div class="card" style="flex:0 0 280px">
+      <div class="stitle">Saved races</div>
+      <ul id="history-list"></ul>
+      <div class="btns" style="margin-top:8px">
+        <button id="btn-ref">🔄 Refresh</button>
+        <button id="btn-expheat">💾 Export this heat</button>
+        <button id="btn-expday">💾 Export today</button>
+      </div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+      <div id="r-title" class="stitle">Select a race from the list</div>
+      <table class="rtable"><thead><tr id="r-head"></tr></thead><tbody id="r-body"></tbody></table>
+      <div class="stitle">Today's heats – summary</div>
+      <table class="rtable">
+        <thead><tr><th>Driver</th><th>Tag</th><th>Heat</th><th>Best lap</th></tr></thead>
+        <tbody id="day-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</div><!-- /panels -->
+
+<script>
+'use strict';
+
+// ══════════════════════════════════════════════════════
+//  STORAGE
+// ══════════════════════════════════════════════════════
+const DB = {
+  get(k)    { try{ return JSON.parse(localStorage.getItem('gc_'+k)); }catch{ return null; } },
+  set(k,v)  { localStorage.setItem('gc_'+k, JSON.stringify(v)); },
+  drivers() { return this.get('drivers') || []; },
+  saveDrivers(a) { this.set('drivers', a); },
+  races()   { return this.get('races') || []; },
+  saveRaces(a)   { this.set('races', a); },
+};
+
+// ══════════════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════════════
+function fmt(s) {
+  if (s == null) return '–:–-.---';
+  const m = Math.floor(s / 60), sec = s - m * 60;
+  return `${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;
+}
+function $(id) { return document.getElementById(id); }
+function mk(tag, props={}) { const e=document.createElement(tag); Object.assign(e,props); return e; }
+
+// ══════════════════════════════════════════════════════
+//  TABS
+// ══════════════════════════════════════════════════════
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+    btn.classList.add('on');
+    $(`${btn.dataset.tab}-panel`).classList.add('on');
+    if (btn.dataset.tab === 'l') liveInit();
+    if (btn.dataset.tab === 's') setupRefresh();
+    if (btn.dataset.tab === 'r') resultsRefresh();
+  });
+});
+
+// ══════════════════════════════════════════════════════
+//  THEME TOGGLE
+// ══════════════════════════════════════════════════════
+const savedTheme = localStorage.getItem('gc_theme') || 'dark';
+if (savedTheme === 'light') { document.body.classList.add('light'); $('btn-theme').textContent='☀️'; }
+$('btn-theme').addEventListener('click', () => {
+  const isLight = document.body.classList.toggle('light');
+  $('btn-theme').textContent = isLight ? '☀️' : '🌙';
+  localStorage.setItem('gc_theme', isLight ? 'light' : 'dark');
+});
+
+// ══════════════════════════════════════════════════════
+//  DATAMATRIX DETECTOR – ZXing  +  GENERATOR – bwip-js
+//  Both loaded as local files in the repo.
+// ══════════════════════════════════════════════════════
+let zxingReader = null;
+
+async function loadLibraries() {
+  const st = $('wasm-status');
+  st.textContent = '⏳ Loading DataMatrix detector...';
+  st.className = 'ws-loading';
+
+  // ── ZXing (detector) ─────────────────────────────────
+  const zxSources = [
+    'zxing.min.js',
+    'https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js',
+  ];
+  for (const src of zxSources) {
+    try { await loadScript(src); if (window.ZXing) break; } catch { /* try next */ }
+  }
+
+  if (!window.ZXing) {
+    st.innerHTML = '❌ zxing.min.js not found. See README for download link.';
+    st.className = 'ws-err';
+    return;
+  }
+
+  try {
+    const hints = new Map();
+    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,
+      [window.ZXing.BarcodeFormat.DATA_MATRIX]);
+    hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
+    zxingReader = new window.ZXing.MultiFormatReader();
+    zxingReader.setHints(hints);
+  } catch(e) {
+    st.textContent = '❌ ZXing init error: ' + e.message;
+    st.className = 'ws-err';
+    return;
+  }
+
+  // ── bwip-js (generator) ───────────────────────────────
+  const bwSources = [
+    'bwip-js.min.js',
+    'https://cdn.jsdelivr.net/npm/bwip-js@3.4.0/dist/bwip-js-min.js',
+  ];
+  for (const src of bwSources) {
+    try { await loadScript(src); if (window.bwipjs) break; } catch { /* try next */ }
+  }
+  if (!window.bwipjs) {
+    st.innerHTML = '✅ DataMatrix detector ready &nbsp;·&nbsp; ⚠️ bwip-js.min.js missing – print cards unavailable. See README.';
+    st.className = 'ws-ok';
+  } else {
+    st.textContent = '✅ DataMatrix detector ready';
+    st.className = 'ws-ok';
+  }
+
+  if (liveStream) $('btn-race').disabled = false;
+}
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+// Detect DataMatrix in current canvas frame
+function detectQR(canvas, ctx) {
+  if (!zxingReader) return [];
+  try {
+    const W = canvas.width, H = canvas.height;
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const lum  = new window.ZXing.RGBLuminanceSource(imgData.data, W, H);
+    const bmp  = new window.ZXing.BinaryBitmap(new window.ZXing.HybridBinarizer(lum));
+    const code = zxingReader.decode(bmp);
+    const dbg  = $('dbg-out');
+    if (dbg) dbg.textContent = `RAW: "${code.getText()}"`;
+    const m = code.getText().match(/^GC:(\d+)$/);
+    if (!m) return [];
+    const pts = code.getResultPoints();
+    return [{ id: parseInt(m[1]), cornerPoints: pts.map(p => ({x:p.getX(), y:p.getY()})) }];
+  } catch {
+    const dbg = $('dbg-out');
+    if (dbg) dbg.textContent = 'scanning...';
+    return [];
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  DATAMATRIX GENERATOR – bwip-js
+// ══════════════════════════════════════════════════════
+function drawQRToCanvas(text, canvas, size) {
+  if (window.bwipjs) {
+    canvas.width = size; canvas.height = size;
+    try {
+      bwipjs.toCanvas(canvas, {
+        bcid:       'datamatrix',
+        text:       text,
+        scale:      Math.max(2, Math.floor(size / 20)),
+        padding:    2,
+        backgroundcolor: 'ffffff',
+        barcolor:        '000000',
+      });
+    } catch(e) {
+      // bwip-js fills canvas itself – on error show number
+      const c = canvas.getContext('2d');
+      c.fillStyle='#fff'; c.fillRect(0,0,size,size);
+      c.fillStyle='#000'; c.font=`bold ${size*.35}px monospace`;
+      c.textAlign='center'; c.textBaseline='middle';
+      c.fillText(text.replace('GC:',''), size/2, size/2);
+    }
+  } else {
+    // Fallback – number only
+    canvas.width = size; canvas.height = size;
+    const c = canvas.getContext('2d');
+    c.fillStyle='#fff'; c.fillRect(0,0,size,size);
+    c.fillStyle='#000'; c.font=`bold ${size*.35}px monospace`;
+    c.textAlign='center'; c.textBaseline='middle';
+    c.fillText(text.replace('GC:',''), size/2, size/2);
+  }
+}
+
+
+// ══════════════════════════════════════════════════════
+//  RACE ENGINE
+// ══════════════════════════════════════════════════════
+class RaceEngine {
+  constructor(drivers, debounce=5, maxLaps=0, bestCount=3) {
+    this.drivers = drivers; this.debounce = debounce;
+    this.maxLaps = maxLaps; this.bestCount = bestCount;
+    this.laps={}; this.cooldown={}; this.startT={}; this.finished={};
+    for (const d of drivers) {
+      this.laps[d.id]=[]; this.cooldown[d.id]=-Infinity;
+      this.startT[d.id]=null; this.finished[d.id]=false;
+    }
+    this.armed=false; this._at=null;
+  }
+  arm()  { this.armed=true; this._at=performance.now(); }
+  stop() { this.armed=false; }
+  get elapsed() { return this._at==null ? 0 : (performance.now()-this._at)/1000; }
+
+  trigger(driverId) {
+    if (!this.armed || this.finished[driverId]) return null;
+    const now = performance.now();
+    if (now - this.cooldown[driverId] < this.debounce*1000) return null;
+    this.cooldown[driverId] = now;
+    const d = this.drivers.find(x => x.id === driverId);
+    if (!d) return null;
+    if (this.startT[driverId] === null) {
+      this.startT[driverId] = now;
+      return { type:'start', name:d.name };
+    }
+    const total = (now - this.startT[driverId]) / 1000;
+    const prev  = this.laps[driverId].at(-1)?.total ?? 0;
+    const lap   = total - prev;
+    const n     = this.laps[driverId].length + 1;
+    const obj   = { type:'lap', n, lap, total, name:d.name };
+    this.laps[driverId].push(obj);
+    if (this.maxLaps && n >= this.maxLaps) { this.finished[driverId]=true; obj.finished=true; }
+    return obj;
+  }
+  allDone() { return this.maxLaps>0 && this.drivers.every(d => this.finished[d.id]); }
+  bestLaps(id) { return [...this.laps[id]].map(l=>l.lap).sort((a,b)=>a-b).slice(0,this.bestCount); }
+  board() {
+    return this.drivers.map(d => {
+      const lps=this.laps[d.id], bests=this.bestLaps(d.id);
+      return { id:d.id, name:d.name, tag:d.tag,
+        laps:lps.length, bestLaps:bests,
+        total:lps.at(-1)?.total??null, last:lps.at(-1)?.lap??null,
+        started:this.startT[d.id]!==null, finished:this.finished[d.id] };
+    }).sort((a,b) => b.laps-a.laps || (a.total??1e9)-(b.total??1e9));
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  DRIVERS TAB
+// ══════════════════════════════════════════════════════
+let editId = null;
+
+function driversLoad() {
+  const list = $('driver-list'); list.innerHTML = '';
+  DB.drivers().forEach(d => {
+    const li = mk('li', {className:'di'}); li.dataset.id = d.id;
+    const num = mk('div', {className:'di-num', textContent: d.tag || '–'});
+    const name = mk('div', {className:'di-name', textContent: d.name});
+    li.append(num, name);
+    li.addEventListener('click', () => driversSelect(d.id));
+    list.appendChild(li);
+  });
+}
+
+function driversSelect(id) {
+  editId = id;
+  document.querySelectorAll('.di').forEach(li => li.classList.toggle('sel', li.dataset.id==id));
+  $('btn-del').disabled = false;
+  $('form-ttl').textContent = 'Edit driver';
+  const d = DB.drivers().find(x => x.id==id);
+  if (!d) return;
+  $('inp-name').value = d.name;
+  $('inp-tag').value  = d.tag || '';
+}
+
+$('btn-new').addEventListener('click', () => {
+  editId = null; $('inp-name').value=''; $('inp-tag').value='';
+  $('form-ttl').textContent = 'Add driver'; $('btn-del').disabled = true;
+  document.querySelectorAll('.di').forEach(li => li.classList.remove('sel'));
+  $('inp-name').focus();
+});
+$('btn-cancel').addEventListener('click', () => $('btn-new').click());
+
+$('btn-save').addEventListener('click', () => {
+  const name = $('inp-name').value.trim();
+  if (!name) { alert('Please enter a name.'); return; }
+  const tag = parseInt($('inp-tag').value) || 0;
+  const drivers = DB.drivers();
+  if (editId != null) {
+    const i = drivers.findIndex(d => d.id==editId);
+    if (i>=0) drivers[i] = {...drivers[i], name, tag};
+  } else {
+    drivers.push({id:Date.now(), name, tag});
+  }
+  DB.saveDrivers(drivers); driversLoad(); setupRefresh();
+});
+
+$('btn-del').addEventListener('click', () => {
+  if (editId==null) return;
+  if (!confirm('Remove this driver?')) return;
+  DB.saveDrivers(DB.drivers().filter(d => d.id!=editId));
+  editId=null; $('btn-del').disabled=true;
+  $('form-ttl').textContent='Add driver'; $('inp-name').value=''; $('inp-tag').value='';
+  driversLoad(); setupRefresh();
+});
+
+$('btn-reset-tags').addEventListener('click', () => {
+  if (!confirm('Clear all tag number assignments? Drivers stay in the list.')) return;
+  DB.saveDrivers(DB.drivers().map(d => ({...d, tag:0})));
+  driversLoad(); setupRefresh();
+});
+
+// ══════════════════════════════════════════════════════
+//  SETUP TAB
+// ══════════════════════════════════════════════════════
+function setupRefresh() {
+  const cont = $('driver-checks'); cont.innerHTML = '';
+  DB.drivers().filter(d => d.tag > 0).forEach(d => {
+    const row = mk('div', {className:'dck'});
+    const cb  = mk('input'); cb.type='checkbox'; cb.checked=true; cb.id='chk'+d.id;
+    const lbl = mk('label', {htmlFor:'chk'+d.id, textContent:d.name});
+    const num = mk('span',  {className:'tag-num', textContent:`#${d.tag}`});
+    row.append(cb, lbl, num); cont.appendChild(row);
+  });
+  if (!cont.children.length) {
+    cont.innerHTML = '<p class="info" style="padding:8px">No drivers with assigned tags. Go to the Drivers tab to assign tag numbers.</p>';
+  }
+}
+$('btn-all').addEventListener('click',  () => $('driver-checks').querySelectorAll('input').forEach(c=>c.checked=true));
+$('btn-none').addEventListener('click', () => $('driver-checks').querySelectorAll('input').forEach(c=>c.checked=false));
+
+function selectedDrivers() {
+  return DB.drivers().filter(d => d.tag>0 && $('chk'+d.id)?.checked);
+}
+function raceSettings() {
+  return {
+    title:     $('inp-title').value.trim() || 'Race',
+    debounce:  parseFloat($('inp-db').value) || 5,
+    maxLaps:   parseInt($('inp-laps').value) || 0,
+    bestCount: parseInt($('inp-best').value) || 3,
+    streak:    parseInt($('inp-streak').value) || 3,
+  };
+}
+
+// ══════════════════════════════════════════════════════
+//  LIVE RACE TAB
+// ══════════════════════════════════════════════════════
+let liveStream=null, engine=null, streaks={}, rafId=null, clockTimer=null, liveSet={};
+const vid=$('cam-video'), cvs=$('cam-canvas'), ctx=cvs.getContext('2d');
+
+// Build a tag→driver lookup
+let tagLookup = {}; // tagId → driver
+
+async function liveInit() {
+  if (liveStream) return;
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const cams = devs.filter(d => d.kind==='videoinput');
+    const sel  = $('sel-cam'); sel.innerHTML='';
+    (cams.length ? cams : [{deviceId:'', label:'Default camera'}]).forEach((c,i) => {
+      sel.appendChild(mk('option', {value:c.deviceId, textContent:c.label||`Camera ${i+1}`}));
+    });
+  } catch {}
+}
+
+$('btn-startcam').addEventListener('click', async () => {
+  const id = $('sel-cam').value;
+  try {
+    if (liveStream) liveStream.getTracks().forEach(t=>t.stop());
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60},
+             ...(id?{deviceId:{exact:id}}:{})}
+    });
+    vid.srcObject = liveStream;
+    vid.onloadedmetadata = () => { cvs.width=vid.videoWidth; cvs.height=vid.videoHeight; };
+    $('btn-startcam').textContent='📷 Camera active ✓';
+    $('btn-startcam').disabled=true;
+    if (zxingReader) $('btn-race').disabled=false;
+    startCameraLoop();
+  } catch(e) { alert('Camera error:\n'+e.message); }
+});
+
+$('btn-race').addEventListener('click', () => {
+  const drivers = selectedDrivers();
+  if (!drivers.length) { alert('Select at least one driver in Race Setup.'); return; }
+  liveSet = raceSettings();
+
+  // Build tag lookup
+  tagLookup = {};
+  drivers.forEach(d => { tagLookup[d.tag] = d; });
+
+  streaks = {};
+  engine  = new RaceEngine(drivers, liveSet.debounce, liveSet.maxLaps, liveSet.bestCount);
+  engine.arm();
+  $('btn-race').disabled=true; $('btn-stopr').disabled=false;
+  $('lap-log').innerHTML='';
+  buildBoard();
+  clockTimer = setInterval(() => $('clock').textContent = fmt(engine.elapsed), 100);
+  startLoop();
+});
+
+$('btn-stopr').addEventListener('click', () => stopRace());
+
+// Kameraloop – kör alltid när kameran är igång
+function startCameraLoop() {
+  function loop() {
+    if (!liveStream) return;
+    requestAnimationFrame(loop);
+    if (vid.readyState < 2) return;
+
+    const scale = Math.min(1, 640 / vid.videoWidth);
+    cvs.width  = Math.round(vid.videoWidth  * scale);
+    cvs.height = Math.round(vid.videoHeight * scale);
+    ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
+
+    const tags = detectQR(cvs, ctx);
+
+    // Race-logik – bara om race är igång
+    if (engine?.armed) {
+      tags.forEach(t => {
+        const d = tagLookup[t.id];
+        drawQROverlay(t, d?.name);
+        if (!d) return;
+        streaks[t.id] = (streaks[t.id] || 0) + 1;
+        if (streaks[t.id] >= liveSet.streak) {
+          streaks[t.id] = 0;
+          const result = engine.trigger(d.id);
+          if (result) handleResult(result);
+        }
+      });
+      Object.keys(streaks).forEach(id => {
+        if (!tags.find(t => t.id == id)) streaks[id] = 0;
+      });
+      buildBoard();
+    }
+  }
+  loop();
+}
+
+function startLoop() { /* race start hanteras nu i startCameraLoop */ }
+
+function drawQROverlay(tag, driverName) {
+  const cp = tag.cornerPoints;
+  if (!cp || cp.length < 4) return;
+  ctx.save();
+  ctx.strokeStyle = '#3fb950'; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(cp[0].x, cp[0].y);
+  for (let i=1;i<4;i++) ctx.lineTo(cp[i].x, cp[i].y);
+  ctx.closePath(); ctx.stroke();
+  ctx.fillStyle = '#3fb950';
+  ctx.font = 'bold 15px Share Tech Mono, monospace';
+  const label = driverName ? `#${tag.id} – ${driverName}` : `#${tag.id}`;
+  ctx.fillText(label, cp[0].x, cp[0].y - 8);
+  ctx.restore();
+}
+
+function handleResult(r) {
+  const log = $('lap-log');
+  const div = mk('div');
+  if (r.type==='start') {
+    div.className='ll-start';
+    div.textContent=`   START  ${r.name}`;
+  } else if (r.finished) {
+    div.className='ll-done';
+    div.textContent=`Lap ${String(r.n).padStart(3)} ${r.name.padEnd(22)} ${fmt(r.lap)}  🏁 FINISHED`;
+  } else {
+    div.className='ll-lap';
+    div.textContent=`Lap ${String(r.n).padStart(3)} ${r.name.padEnd(22)} ${fmt(r.lap)}`;
+  }
+  log.insertBefore(div, log.firstChild);
+  if (r.finished && engine.allDone()) stopRace(true);
+}
+
+function buildBoard() {
+  if (!engine) return;
+  const board = engine.board();
+  const bc    = engine.bestCount;
+  const head  = $('lb-head');
+  if (!head.children.length) {
+    ['#','Driver','Laps',...Array.from({length:bc},(_,i)=>`Best ${i+1}`),'Last'].forEach(h=>{
+      const th=mk('th',{textContent:h}); head.appendChild(th);
+    });
+  }
+  const body = $('lb-body'); body.innerHTML='';
+  board.forEach((r,i) => {
+    const tr=mk('tr');
+    const nc=r.finished?'c-done':r.started?'c-go':'c-wait';
+    const bests=r.bestLaps||[];
+    tr.innerHTML=`<td>${i+1}</td><td class="${nc}">${r.name}</td><td>${r.laps}</td>
+      ${bests.slice(0,bc).map(b=>`<td>${fmt(b)}</td>`).join('')}
+      ${Array.from({length:Math.max(0,bc-bests.length)},()=>'<td>–</td>').join('')}
+      <td>${fmt(r.last)}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function stopRace(auto=false) {
+  if (!engine) return;
+  engine.stop();
+  if (rafId) { cancelAnimationFrame(rafId); rafId=null; }
+  clearInterval(clockTimer);
+  $('btn-stopr').disabled=true; $('btn-race').disabled=false;
+  const races = DB.races();
+  races.push({id:Date.now(), title:liveSet.title,
+    date:new Date().toLocaleString('sv-SE'),
+    results:engine.board(), bestCount:liveSet.bestCount});
+  DB.saveRaces(races);
+  alert(auto
+    ? `All drivers finished! "${liveSet.title}" saved.`
+    : `"${liveSet.title}" saved to Results.`);
+  engine=null;
+}
+
+// ══════════════════════════════════════════════════════
+//  PRINT CARDS
+// ══════════════════════════════════════════════════════
+function makeCard(id, canvasSize) {
+  const canvas = document.createElement('canvas');
+  drawQRToCanvas(`GC:${id}`, canvas, canvasSize);
+  return canvas;
+}
+
+$('btn-preview').addEventListener('click', () => {
+  const from = parseInt($('inp-from').value);
+  const to   = Math.min(parseInt($('inp-to').value), 9999);
+  if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range.'); return; }
+  const grid = $('card-grid'); grid.innerHTML = '';
+  for (let id=from; id<=to; id++) {
+    const card = document.createElement('div'); card.className='preview-card';
+    const qr   = makeCard(id, 120);
+    const num  = document.createElement('div'); num.className='card-num'; num.textContent=String(id);
+    card.append(qr, num); grid.appendChild(card);
+  }
+});
+
+$('btn-print').addEventListener('click', () => {
+  const from = parseInt($('inp-from').value);
+  const to   = Math.min(parseInt($('inp-to').value), 9999);
+  if (isNaN(from)||isNaN(to)||from<1||to<from) { alert('Enter a valid range.'); return; }
+  const printGrid = $('print-grid'); printGrid.innerHTML='';
+  for (let id=from; id<=to; id++) {
+    const card = document.createElement('div'); card.className='print-card';
+    const qr   = makeCard(id, 300);
+    qr.style.cssText = 'image-rendering:pixelated;width:100%;max-width:30mm;height:auto';
+    const num  = document.createElement('div'); num.className='pnum'; num.textContent=String(id);
+    card.append(qr, num); printGrid.appendChild(card);
+  }
+  window.print();
+});
+
+// ══════════════════════════════════════════════════════
+//  RESULTS TAB
+// ══════════════════════════════════════════════════════
+let allRaces=[], selectedIdx=-1;
+
+function resultsRefresh() {
+  allRaces = DB.races();
+  const list=$('history-list'); list.innerHTML='';
+  allRaces.forEach((r,i)=>{
+    const li=mk('li',{className:'hi', textContent:`${r.date}  –  ${r.title}`});
+    li.addEventListener('click',()=>showRace(i)); list.appendChild(li);
+  });
+  buildDayTable();
+  if (selectedIdx>=0&&selectedIdx<allRaces.length) showRace(selectedIdx);
+}
+
+function showRace(idx) {
+  selectedIdx=idx;
+  document.querySelectorAll('.hi').forEach((li,i)=>li.classList.toggle('sel',i===idx));
+  const r=allRaces[idx], bc=r.bestCount||3;
+  $('r-title').textContent=`${r.title}   ${r.date}`;
+  const head=$('r-head'); head.innerHTML='';
+  ['Pos','Driver','Tag','Laps',...Array.from({length:bc},(_,i)=>`Best ${i+1}`),'Total'].forEach(h=>{
+    head.appendChild(mk('th',{textContent:h}));
+  });
+  const body=$('r-body'); body.innerHTML='';
+  (r.results||[]).forEach((row,i)=>{
+    const bests=row.bestLaps||[]; const tr=mk('tr');
+    tr.innerHTML=`<td>${i+1}</td><td>${row.name}</td><td>#${row.tag||'–'}</td><td>${row.laps}</td>
+      ${bests.slice(0,bc).map(b=>`<td>${fmt(b)}</td>`).join('')}
+      ${Array.from({length:Math.max(0,bc-bests.length)},()=>'<td>–</td>').join('')}
+      <td>${fmt(row.total)}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+function buildDayTable() {
+  const body=$('day-body'); body.innerHTML='';
+  const today=new Date().toLocaleDateString('sv-SE');
+  allRaces.filter(r=>r.date.startsWith(today)).forEach(r=>{
+    (r.results||[]).forEach(row=>{
+      const bests=row.bestLaps||[]; const tr=mk('tr');
+      tr.innerHTML=`<td>${row.name}</td><td>#${row.tag||'–'}</td><td>${r.title}</td><td>${fmt(bests[0])}</td>`;
+      body.appendChild(tr);
+    });
+  });
+}
+
+function buildExportText(races, bc) {
+  const SEP='='.repeat(66);
+  const lines=[SEP,`  GATECAM – Results ${new Date().toLocaleDateString('sv-SE')}`,SEP];
+  races.forEach(r=>{
+    lines.push('','-'.repeat(66),`  ${r.title}   (${r.date})`,'-'.repeat(66));
+    const hdr=`${'Pos'.padEnd(5)}${'Driver'.padEnd(24)}${'Tag'.padEnd(6)}${'Laps'.padEnd(7)}`+
+      Array.from({length:bc},(_,i)=>`Best ${i+1}`.padEnd(13)).join('')+'Total';
+    lines.push(hdr,'-'.repeat(hdr.length));
+    (r.results||[]).forEach((row,i)=>{
+      const bests=row.bestLaps||[];
+      let line=`${String(i+1).padEnd(5)}${row.name.padEnd(24)}${('#'+(row.tag||'–')).padEnd(6)}${String(row.laps).padEnd(7)}`;
+      for(let j=0;j<bc;j++) line+=(j<bests.length?fmt(bests[j]):'–').padEnd(13);
+      line+=fmt(row.total); lines.push(line);
+    });
+  });
+  lines.push('',SEP,'  Made by Jonathan Wastring',SEP);
+  return lines.join('\n');
+}
+
+function download(text, filename) {
+  const a=mk('a');
+  a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'}));
+  a.download=filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+$('btn-ref').addEventListener('click', resultsRefresh);
+$('btn-expheat').addEventListener('click', ()=>{
+  if(selectedIdx<0){alert('Select a race first.');return;}
+  const r=allRaces[selectedIdx];
+  download(buildExportText([r],r.bestCount||3), `${r.title.replace(/[^a-z0-9]/gi,'_')}.txt`);
+});
+$('btn-expday').addEventListener('click', ()=>{
+  const today=new Date().toLocaleDateString('sv-SE');
+  const races=allRaces.filter(r=>r.date.startsWith(today));
+  if(!races.length){alert('No races saved today.');return;}
+  download(buildExportText(races,races[0].bestCount||3),`results_${today}.txt`);
+});
+
+// ══════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════
+driversLoad();
+setupRefresh();
+loadLibraries();
+</script>
+</body>
+</html>
