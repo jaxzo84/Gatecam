@@ -155,7 +155,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
 <div id="hdr">
   <div class="logo">
     <span style="font-size:20px">🏁</span>
-    <div><div class="logo-text">GATECAM</div><div class="logo-sub">QR lap timing</div></div>
+    <div><div class="logo-text">GATECAM</div><div class="logo-sub">DataMatrix lap timing</div></div>
   </div>
   <div class="tabs">
     <button class="tab on" data-tab="d">🚗 Drivers</button>
@@ -283,7 +283,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button id="btn-preview" class="go">👁 Preview cards</button>
       <button id="btn-print" class="go">🖨️ Print</button>
     </div>
-    <p class="info" style="margin-top:8px">QR codes are generated locally – no internet needed after the page has loaded.</p>
+    <p class="info" style="margin-top:8px">DataMatrix codes are generated locally – no internet needed after the page has loaded. DataMatrix is faster to read than QR in motion.</p>
   </div>
   <div id="card-grid"></div>
 </div>
@@ -367,41 +367,60 @@ $('btn-theme').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════════════════
-//  QR DETECTOR – jsQR (loaded from same repo, no CDN)
+//  DATAMATRIX DETECTOR – ZXing  +  GENERATOR – bwip-js
+//  Both loaded as local files in the repo.
 // ══════════════════════════════════════════════════════
-let jsQRLib = null;
+let zxingReader = null;
 
 async function loadLibraries() {
   const st = $('wasm-status');
-  st.textContent = '⏳ Loading QR detector...';
+  st.textContent = '⏳ Loading DataMatrix detector...';
   st.className = 'ws-loading';
 
-  // Try local file first (committed to repo), then CDN fallback
-  const sources = ['jsqr.min.js', 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'];
-  for (const src of sources) {
-    try {
-      await loadScript(src);
-      if (window.jsQR) { jsQRLib = window.jsQR; break; }
-    } catch { /* try next */ }
+  // ── ZXing (detector) ─────────────────────────────────
+  const zxSources = [
+    'zxing.min.js',
+    'https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js',
+  ];
+  for (const src of zxSources) {
+    try { await loadScript(src); if (window.ZXing) break; } catch { /* try next */ }
   }
 
-  if (!jsQRLib) {
-    st.innerHTML = '❌ jsqr.min.js not found. <a href="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" target="_blank" style="color:#58a6ff">Download jsQR</a> and add it to your repo as <b>jsqr.min.js</b>.';
+  if (!window.ZXing) {
+    st.innerHTML = '❌ zxing.min.js not found. See README for download link.';
     st.className = 'ws-err';
     return;
   }
 
-  // Load QRious for QR generation (print cards)
-  const qrSources = ['qrious.min.js', 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js'];
-  for (const src of qrSources) {
-    try { await loadScript(src); if (window.QRious) break; } catch { /* try next */ }
-  }
-  if (!window.QRious) {
-    st.innerHTML += ' · ⚠️ qrious.min.js not found – print cards unavailable. <a href="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js" target="_blank" style="color:#58a6ff">Download QRious</a>';
+  try {
+    const hints = new Map();
+    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,
+      [window.ZXing.BarcodeFormat.DATA_MATRIX]);
+    hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
+    zxingReader = new window.ZXing.MultiFormatReader();
+    zxingReader.setHints(hints);
+  } catch(e) {
+    st.textContent = '❌ ZXing init error: ' + e.message;
+    st.className = 'ws-err';
+    return;
   }
 
-  st.textContent = '✅ QR detector ready';
-  st.className = 'ws-ok';
+  // ── bwip-js (generator) ───────────────────────────────
+  const bwSources = [
+    'bwip-js.min.js',
+    'https://cdn.jsdelivr.net/npm/bwip-js@3.4.0/dist/bwip-js-min.js',
+  ];
+  for (const src of bwSources) {
+    try { await loadScript(src); if (window.bwipjs) break; } catch { /* try next */ }
+  }
+  if (!window.bwipjs) {
+    st.innerHTML = '✅ DataMatrix detector ready &nbsp;·&nbsp; ⚠️ bwip-js.min.js missing – print cards unavailable. See README.';
+    st.className = 'ws-ok';
+  } else {
+    st.textContent = '✅ DataMatrix detector ready';
+    st.className = 'ws-ok';
+  }
+
   if (liveStream) $('btn-race').disabled = false;
 }
 
@@ -414,64 +433,61 @@ function loadScript(src) {
   });
 }
 
-// Detect QR in current canvas frame
+// Detect DataMatrix in current canvas frame
 function detectQR(canvas, ctx) {
-  if (!jsQRLib) return [];
+  if (!zxingReader) return [];
   try {
     const W = canvas.width, H = canvas.height;
-    const img = ctx.getImageData(0, 0, W, H);
-    const code = jsQRLib(img.data, W, H, { inversionAttempts: 'attemptBoth' });
-    const dbg = $('dbg-out');
-    if (!code) {
-      if (dbg) dbg.textContent = 'jsQR running – no QR found in frame';
-      return [];
-    }
-    if (dbg) dbg.textContent = `RAW: "${code.data}"`;
-    const m = code.data.match(/^GC:(\d+)$/);
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const lum  = new window.ZXing.RGBLuminanceSource(imgData.data, W, H);
+    const bmp  = new window.ZXing.BinaryBitmap(new window.ZXing.HybridBinarizer(lum));
+    const code = zxingReader.decode(bmp);
+    const dbg  = $('dbg-out');
+    if (dbg) dbg.textContent = `RAW: "${code.getText()}"`;
+    const m = code.getText().match(/^GC:(\d+)$/);
     if (!m) return [];
-    return [{ id: parseInt(m[1]), cornerPoints: [
-      code.location.topLeftCorner,
-      code.location.topRightCorner,
-      code.location.bottomRightCorner,
-      code.location.bottomLeftCorner,
-    ]}];
-  } catch(e) {
+    const pts = code.getResultPoints();
+    return [{ id: parseInt(m[1]), cornerPoints: pts.map(p => ({x:p.getX(), y:p.getY()})) }];
+  } catch {
     const dbg = $('dbg-out');
-    if (dbg) dbg.textContent = 'jsQR error: ' + e.message;
+    if (dbg) dbg.textContent = 'scanning...';
     return [];
   }
 }
 
 // ══════════════════════════════════════════════════════
-//  QR CODE GENERATOR – uses qrious.min.js (local file)
+//  DATAMATRIX GENERATOR – bwip-js
 // ══════════════════════════════════════════════════════
-// qrious is loaded alongside jsqr.min.js in the repo.
-// drawQRToCanvas is called from the print functions below.
-
 function drawQRToCanvas(text, canvas, size) {
-  if (window.QRious) {
-    // QRious renders directly to a canvas element
+  if (window.bwipjs) {
     canvas.width = size; canvas.height = size;
-    new QRious({
-      element: canvas,
-      value: text,
-      size: size,
-      level: 'H',         // highest error correction – survives dirt
-      background: '#ffffff',
-      foreground: '#000000',
-    });
+    try {
+      bwipjs.toCanvas(canvas, {
+        bcid:       'datamatrix',
+        text:       text,
+        scale:      Math.max(2, Math.floor(size / 20)),
+        padding:    2,
+        backgroundcolor: 'ffffff',
+        barcolor:        '000000',
+      });
+    } catch(e) {
+      // bwip-js fills canvas itself – on error show number
+      const c = canvas.getContext('2d');
+      c.fillStyle='#fff'; c.fillRect(0,0,size,size);
+      c.fillStyle='#000'; c.font=`bold ${size*.35}px monospace`;
+      c.textAlign='center'; c.textBaseline='middle';
+      c.fillText(text.replace('GC:',''), size/2, size/2);
+    }
   } else {
-    // Fallback: just show the number if library not loaded
+    // Fallback – number only
     canvas.width = size; canvas.height = size;
     const c = canvas.getContext('2d');
-    c.fillStyle = '#fff'; c.fillRect(0,0,size,size);
-    c.fillStyle = '#000';
-    c.font = `bold ${size*0.35}px monospace`;
-    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle='#fff'; c.fillRect(0,0,size,size);
+    c.fillStyle='#000'; c.font=`bold ${size*.35}px monospace`;
+    c.textAlign='center'; c.textBaseline='middle';
     c.fillText(text.replace('GC:',''), size/2, size/2);
   }
 }
-
 
 
 // ══════════════════════════════════════════════════════
@@ -655,7 +671,7 @@ $('btn-startcam').addEventListener('click', async () => {
     vid.onloadedmetadata = () => { cvs.width=vid.videoWidth; cvs.height=vid.videoHeight; };
     $('btn-startcam').textContent='📷 Camera active ✓';
     $('btn-startcam').disabled=true;
-    if (jsQRLib) $('btn-race').disabled=false;
+    if (zxingReader) $('btn-race').disabled=false;
     startCameraLoop();
   } catch(e) { alert('Camera error:\n'+e.message); }
 });

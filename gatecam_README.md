@@ -1,72 +1,54 @@
-# 🏁 GateCam – RC Lap Timer with AprilTag detection
+# 🏁 GateCam – RC Lap Timer
 
 Made by Jonathan Wastring
 
-Live at: `https://jaxzo84.github.io/gatecam`
+Uses **DataMatrix** codes – faster to read in motion than QR.
 
 ---
 
-## Setup – 3 steps
+## Files needed in repo
 
-### 1. Create a GitHub repo named `gatecam`
-
-### 2. Upload `index.html` to the repo
-
-### 3. Enable GitHub Pages
-Settings → Pages → Source: **Deploy from branch** → **main** → **/ (root)**
-
-Done. Your timing system is live at `https://jaxzo84.github.io/gatecam`
-
----
-
-## AprilTag detector
-
-The app loads the AprilTag WASM detector automatically from unpkg CDN.
-If you want it to work offline too, download these two files and put them in a `libs/` folder:
-
-```
-https://unpkg.com/apriltag-wasm@1.0.3/dist/apriltag_wasm.js
-https://unpkg.com/apriltag-wasm@1.0.3/dist/apriltag_wasm.wasm
-```
-
-Your repo structure would then be:
 ```
 index.html
-libs/
-  apriltag_wasm.js
-  apriltag_wasm.wasm
+zxing.min.js       ← DataMatrix detector
+bwip-js.min.js     ← DataMatrix generator (for print cards)
+README.md
 ```
+
+## Download links (right-click → Save As)
+
+**zxing.min.js** (detector):
+https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js
+→ save as: zxing.min.js
+
+**bwip-js.min.js** (generator):
+https://cdn.jsdelivr.net/npm/bwip-js@3.4.0/dist/bwip-js-min.js
+→ save as: bwip-js.min.js
+
+---
+
+## GitHub Pages setup
+Settings → Pages → Branch: main → / (root) → Save
+Live at: https://your-username.github.io/gatecam
 
 ---
 
 ## Print cards
+- Print Cards tab → range → Preview → Print
+- 4 cards per A4, portrait
+- Matt lamination – glossy causes glare
+- Cards reusable across event days, no names
 
-- Go to the **Print Cards** tab
-- Enter a range (e.g. 1–30)
-- Click **Print** → browser print dialog opens
-- Cards are 4 per A4 sheet
-- Use **matt lamination** – glossy reflects light and breaks detection
-- Cards are reusable across event days
-
-## Camera setup
-
-- Mount camera in the gate, pointing straight down
-- Adjust gate height so the car roof (and tag) fills a reasonable portion of the frame
-- 720p 60fps recommended
-- A USB webcam on a simple bracket works well
+## Camera
+- Mount pointing straight down in the gate
+- 60fps USB webcam recommended
+- Even lighting, avoid direct sunlight
 
 ## Workflow
+Before event: print + laminate batch (#1–60)
+Race day: assign numbers in Drivers tab → give cards to drivers
+Each heat: Setup → tick drivers → Live Race → Start
+End of day: "Clear all tag assignments"
 
-**Before the event:**
-- Print and laminate a batch of cards (e.g. #1–60)
-- No names needed – cards are reusable
-
-**Race day morning:**
-- Drivers tab: assign tag numbers to drivers for today
-- Give each driver their card
-- At end of day: hit "Clear all tag assignments"
-
-**Per heat:**
-- Race Setup: tick the drivers in this heat, set laps/debounce
-- Live Race: start camera, start race
-- Results: export to text file
+## Browser
+Chrome, Edge, Firefox, Safari – any modern browser.
