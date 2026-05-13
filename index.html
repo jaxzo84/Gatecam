@@ -397,6 +397,7 @@ async function loadLibraries() {
     hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,
       [window.ZXing.BarcodeFormat.DATA_MATRIX]);
     hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
+    hints.set(window.ZXing.DecodeHintType.ALSO_INVERTED, true);
     zxingReader = new window.ZXing.MultiFormatReader();
     zxingReader.setHints(hints);
   } catch(e) {
@@ -715,9 +716,9 @@ function startCameraLoop() {
     requestAnimationFrame(loop);
     if (vid.readyState < 2) return;
 
-    const scale = Math.min(1, 640 / vid.videoWidth);
-    cvs.width  = Math.round(vid.videoWidth  * scale);
-    cvs.height = Math.round(vid.videoHeight * scale);
+    // Full resolution – DataMatrix behöver fler pixlar än QR
+    cvs.width  = vid.videoWidth;
+    cvs.height = vid.videoHeight;
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
 
     const tags = detectQR(cvs, ctx);
