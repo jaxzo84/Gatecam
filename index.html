@@ -407,22 +407,37 @@ function loadScript(src) {
 }
 
 // Detect QR in canvas frame – jsQR is synchronous and fast
+// Offscreen canvas för nedskalning – återanvänds varje frame
+const offscreen = document.createElement('canvas');
+const offCtx    = offscreen.getContext('2d', { willReadFrequently: true });
+
 function detectQR(canvas, ctx) {
   if (!jsQRLib) return [];
   try {
-    const W = canvas.width, H = canvas.height;
-    const img  = ctx.getImageData(0, 0, W, H);
-    const code = jsQRLib(img.data, W, H, { inversionAttempts: 'attemptBoth' });
+    // Skala ner till max 640px brett – jsQR är snabbare på mindre bilder
+    // och koden tar upp mer relativ yta ändå vid gatekamera
+    const scale = Math.min(1, 640 / canvas.width);
+    const W = Math.round(canvas.width  * scale);
+    const H = Math.round(canvas.height * scale);
+    offscreen.width  = W;
+    offscreen.height = H;
+    offCtx.drawImage(canvas, 0, 0, W, H);
+    const img  = offCtx.getImageData(0, 0, W, H);
+
+    // dontInvert = snabbare (koden är mörk på ljus bakgrund)
+    const code = jsQRLib(img.data, W, H, { inversionAttempts: 'dontInvert' });
     const dbg  = $('dbg-out');
     if (!code) { if (dbg) dbg.textContent = 'scanning...'; return []; }
-    if (dbg) dbg.textContent = `RAW: "${code.data}"`;
+    if (dbg) dbg.textContent = `✅ RAW: "${code.data}"`;
     const m = code.data.match(/^GC:(\d+)$/);
     if (!m) return [];
+    // Skala upp koordinater tillbaka till skärmstorlek
+    const inv = 1 / scale;
     return [{ id: parseInt(m[1]), cornerPoints: [
-      code.location.topLeftCorner,
-      code.location.topRightCorner,
-      code.location.bottomRightCorner,
-      code.location.bottomLeftCorner,
+      { x: code.location.topLeftCorner.x     * inv, y: code.location.topLeftCorner.y     * inv },
+      { x: code.location.topRightCorner.x    * inv, y: code.location.topRightCorner.y    * inv },
+      { x: code.location.bottomRightCorner.x * inv, y: code.location.bottomRightCorner.y * inv },
+      { x: code.location.bottomLeftCorner.x  * inv, y: code.location.bottomLeftCorner.y  * inv },
     ]}];
   } catch(e) {
     const dbg = $('dbg-out');
@@ -435,7 +450,7 @@ function detectQR(canvas, ctx) {
 function drawQRToCanvas(text, canvas, size) {
   canvas.width = size; canvas.height = size;
   if (window.QRious) {
-    new QRious({ element: canvas, value: text, size, level: 'H',
+    new QRious({ element: canvas, value: text, size, level: 'L',
       background: '#ffffff', foreground: '#000000' });
   } else {
     const c = canvas.getContext('2d');
@@ -661,16 +676,21 @@ function startCameraLoop() {
     requestAnimationFrame(loop);
     if (vid.readyState < 2) return;
 
+    // Rita video till canvas på full upplösning (för visning)
     cvs.width  = vid.videoWidth;
     cvs.height = vid.videoHeight;
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
 
+    // jsQR läser från offscreen-canvas (nedskalad, snabbare)
     const tags = detectQR(cvs, ctx);
 
+    // Visa alltid overlay om tag hittas, oavsett race-status
+    tags.forEach(t => drawQROverlay(t, tagLookup[t.id]?.name));
+
     if (!engine?.armed) return;
+
     tags.forEach(t => {
       const d = tagLookup[t.id];
-      drawQROverlay(t, d?.name);
       if (!d) return;
       streaks[t.id] = (streaks[t.id] || 0) + 1;
       if (streaks[t.id] >= liveSet.streak) {
