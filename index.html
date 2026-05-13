@@ -437,20 +437,31 @@ function loadScript(src) {
 function detectQR(canvas, ctx) {
   if (!zxingReader) return [];
   try {
-    const W = canvas.width, H = canvas.height;
-    const imgData = ctx.getImageData(0, 0, W, H);
-    const lum  = new window.ZXing.RGBLuminanceSource(imgData.data, W, H);
+    const dbg = $('dbg-out');
+    let lum;
+
+    // HTMLCanvasElementLuminanceSource är rätt för browser
+    if (window.ZXing.HTMLCanvasElementLuminanceSource) {
+      lum = new window.ZXing.HTMLCanvasElementLuminanceSource(canvas);
+    } else if (window.ZXing.RGBLuminanceSource) {
+      const W = canvas.width, H = canvas.height;
+      const imgData = ctx.getImageData(0, 0, W, H);
+      lum = new window.ZXing.RGBLuminanceSource(imgData.data, W, H);
+    } else {
+      if (dbg) dbg.textContent = '❌ No luminance source available in ZXing build';
+      return [];
+    }
+
     const bmp  = new window.ZXing.BinaryBitmap(new window.ZXing.HybridBinarizer(lum));
     const code = zxingReader.decode(bmp);
-    const dbg  = $('dbg-out');
     if (dbg) dbg.textContent = `RAW: "${code.getText()}"`;
     const m = code.getText().match(/^GC:(\d+)$/);
     if (!m) return [];
     const pts = code.getResultPoints();
     return [{ id: parseInt(m[1]), cornerPoints: pts.map(p => ({x:p.getX(), y:p.getY()})) }];
-  } catch {
+  } catch(e) {
     const dbg = $('dbg-out');
-    if (dbg) dbg.textContent = 'scanning...';
+    if (dbg) dbg.textContent = e.name === 'NotFoundException' ? 'scanning...' : '❌ ' + e.message;
     return [];
   }
 }
