@@ -155,7 +155,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
 <div id="hdr">
   <div class="logo">
     <span style="font-size:20px">🏁</span>
-    <div><div class="logo-text">GATECAM</div><div class="logo-sub">DataMatrix lap timing</div></div>
+    <div><div class="logo-text">GATECAM</div><div class="logo-sub">QR lap timing</div></div>
   </div>
   <div class="tabs">
     <button class="tab on" data-tab="d">🚗 Drivers</button>
@@ -283,7 +283,7 @@ hr{border:none;border-top:1px solid var(--border);margin:6px 0}
       <button id="btn-preview" class="go">👁 Preview cards</button>
       <button id="btn-print" class="go">🖨️ Print</button>
     </div>
-    <p class="info" style="margin-top:8px">DataMatrix codes are generated locally – no internet needed after the page has loaded. DataMatrix is faster to read than QR in motion.</p>
+    <p class="info" style="margin-top:8px">QR codes are generated locally – no internet needed after the page has loaded. </p>
   </div>
   <div id="card-grid"></div>
 </div>
@@ -367,59 +367,33 @@ $('btn-theme').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════════════════
-//  DATAMATRIX DETECTOR – ZXing  +  GENERATOR – bwip-js
-//  Both loaded as local files in the repo.
+//  DETECTOR – jsQR  +  GENERATOR – QRious
 // ══════════════════════════════════════════════════════
-let zxingReader = null;
+let jsQRLib = null;
 
 async function loadLibraries() {
   const st = $('wasm-status');
-  st.textContent = '⏳ Loading DataMatrix detector...';
+  st.textContent = '⏳ Loading QR detector...';
   st.className = 'ws-loading';
 
-  // ── ZXing (detector) ─────────────────────────────────
-  const zxSources = [
-    'zxing.min.js',
-    'https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js',
-  ];
-  for (const src of zxSources) {
-    try { await loadScript(src); if (window.ZXing) break; } catch { /* try next */ }
+  // jsQR – detector
+  const jsSrc = ['jsqr.min.js', 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'];
+  for (const src of jsSrc) {
+    try { await loadScript(src); if (window.jsQR) { jsQRLib = window.jsQR; break; } } catch {}
+  }
+  if (!jsQRLib) {
+    st.innerHTML = '❌ jsqr.min.js not found – <a href="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js" style="color:#58a6ff" target="_blank">download here</a> and add to repo as jsqr.min.js';
+    st.className = 'ws-err'; return;
   }
 
-  if (!window.ZXing) {
-    st.innerHTML = '❌ zxing.min.js not found. See README for download link.';
-    st.className = 'ws-err';
-    return;
+  // QRious – generator
+  const qrSrc = ['qrious.min.js', 'https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js'];
+  for (const src of qrSrc) {
+    try { await loadScript(src); if (window.QRious) break; } catch {}
   }
 
-  try {
-    const hints = new Map();
-    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,
-      [window.ZXing.BarcodeFormat.DATA_MATRIX]);
-    hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
-    zxingReader = new window.ZXing.BrowserMultiFormatReader(hints);
-  } catch(e) {
-    st.textContent = '❌ ZXing init error: ' + e.message;
-    st.className = 'ws-err';
-    return;
-  }
-
-  // ── bwip-js (generator) ───────────────────────────────
-  const bwSources = [
-    'bwip-js.min.js',
-    'https://cdn.jsdelivr.net/npm/bwip-js@3.4.0/dist/bwip-js-min.js',
-  ];
-  for (const src of bwSources) {
-    try { await loadScript(src); if (window.bwipjs) break; } catch { /* try next */ }
-  }
-  if (!window.bwipjs) {
-    st.innerHTML = '✅ DataMatrix detector ready &nbsp;·&nbsp; ⚠️ bwip-js.min.js missing – print cards unavailable. See README.';
-    st.className = 'ws-ok';
-  } else {
-    st.textContent = '✅ DataMatrix detector ready';
-    st.className = 'ws-ok';
-  }
-
+  st.textContent = '✅ QR detector ready';
+  st.className = 'ws-ok';
   if (liveStream) $('btn-race').disabled = false;
 }
 
@@ -432,54 +406,42 @@ function loadScript(src) {
   });
 }
 
-// Detect DataMatrix in current canvas frame
-async function detectQR(canvas, ctx) {
-  if (!zxingReader) return [];
+// Detect QR in canvas frame – jsQR is synchronous and fast
+function detectQR(canvas, ctx) {
+  if (!jsQRLib) return [];
   try {
-    const result = await zxingReader.decodeFromCanvas(canvas);
-    const dbg = $('dbg-out');
-    if (dbg) dbg.textContent = `RAW: "${result.getText()}"`;
-    const m = result.getText().match(/^GC:(\d+)$/);
+    const W = canvas.width, H = canvas.height;
+    const img  = ctx.getImageData(0, 0, W, H);
+    const code = jsQRLib(img.data, W, H, { inversionAttempts: 'attemptBoth' });
+    const dbg  = $('dbg-out');
+    if (!code) { if (dbg) dbg.textContent = 'scanning...'; return []; }
+    if (dbg) dbg.textContent = `RAW: "${code.data}"`;
+    const m = code.data.match(/^GC:(\d+)$/);
     if (!m) return [];
-    const pts = result.getResultPoints();
-    return [{ id: parseInt(m[1]), cornerPoints: pts.map(p => ({x:p.getX(), y:p.getY()})) }];
+    return [{ id: parseInt(m[1]), cornerPoints: [
+      code.location.topLeftCorner,
+      code.location.topRightCorner,
+      code.location.bottomRightCorner,
+      code.location.bottomLeftCorner,
+    ]}];
   } catch(e) {
     const dbg = $('dbg-out');
-    if (dbg) dbg.textContent = e.name === 'NotFoundException' ? 'scanning...' : '❌ ' + e.message;
+    if (dbg) dbg.textContent = '❌ ' + e.message;
     return [];
   }
 }
 
-// ══════════════════════════════════════════════════════
-//  DATAMATRIX GENERATOR – bwip-js
-// ══════════════════════════════════════════════════════
+// Generate QR to canvas using QRious
 function drawQRToCanvas(text, canvas, size) {
-  if (window.bwipjs) {
-    canvas.width = size; canvas.height = size;
-    try {
-      bwipjs.toCanvas(canvas, {
-        bcid:       'datamatrix',
-        text:       text,
-        scale:      Math.max(2, Math.floor(size / 20)),
-        padding:    2,
-        backgroundcolor: 'ffffff',
-        barcolor:        '000000',
-      });
-    } catch(e) {
-      // bwip-js fills canvas itself – on error show number
-      const c = canvas.getContext('2d');
-      c.fillStyle='#fff'; c.fillRect(0,0,size,size);
-      c.fillStyle='#000'; c.font=`bold ${size*.35}px monospace`;
-      c.textAlign='center'; c.textBaseline='middle';
-      c.fillText(text.replace('GC:',''), size/2, size/2);
-    }
+  canvas.width = size; canvas.height = size;
+  if (window.QRious) {
+    new QRious({ element: canvas, value: text, size, level: 'H',
+      background: '#ffffff', foreground: '#000000' });
   } else {
-    // Fallback – number only
-    canvas.width = size; canvas.height = size;
     const c = canvas.getContext('2d');
-    c.fillStyle='#fff'; c.fillRect(0,0,size,size);
-    c.fillStyle='#000'; c.font=`bold ${size*.35}px monospace`;
-    c.textAlign='center'; c.textBaseline='middle';
+    c.fillStyle = '#fff'; c.fillRect(0,0,size,size);
+    c.fillStyle = '#000'; c.font = `bold ${size*.35}px monospace`;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
     c.fillText(text.replace('GC:',''), size/2, size/2);
   }
 }
@@ -666,7 +628,7 @@ $('btn-startcam').addEventListener('click', async () => {
     vid.onloadedmetadata = () => { cvs.width=vid.videoWidth; cvs.height=vid.videoHeight; };
     $('btn-startcam').textContent='📷 Camera active ✓';
     $('btn-startcam').disabled=true;
-    if (zxingReader) $('btn-race').disabled=false;
+    if (jsQRLib) $('btn-race').disabled=false;
     startCameraLoop();
   } catch(e) { alert('Camera error:\n'+e.message); }
 });
@@ -694,36 +656,33 @@ $('btn-stopr').addEventListener('click', () => stopRace());
 
 // Kameraloop – kör alltid när kameran är igång
 function startCameraLoop() {
-  let busy = false;
   function loop() {
     if (!liveStream) return;
     requestAnimationFrame(loop);
-    if (vid.readyState < 2 || busy) return;
+    if (vid.readyState < 2) return;
 
     cvs.width  = vid.videoWidth;
     cvs.height = vid.videoHeight;
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
 
-    busy = true;
-    detectQR(cvs, ctx).then(tags => {
-      busy = false;
-      if (!engine?.armed) return;
-      tags.forEach(t => {
-        const d = tagLookup[t.id];
-        drawQROverlay(t, d?.name);
-        if (!d) return;
-        streaks[t.id] = (streaks[t.id] || 0) + 1;
-        if (streaks[t.id] >= liveSet.streak) {
-          streaks[t.id] = 0;
-          const result = engine.trigger(d.id);
-          if (result) handleResult(result);
-        }
-      });
-      Object.keys(streaks).forEach(id => {
-        if (!tags.find(t => t.id == id)) streaks[id] = 0;
-      });
-      buildBoard();
-    }).catch(() => { busy = false; });
+    const tags = detectQR(cvs, ctx);
+
+    if (!engine?.armed) return;
+    tags.forEach(t => {
+      const d = tagLookup[t.id];
+      drawQROverlay(t, d?.name);
+      if (!d) return;
+      streaks[t.id] = (streaks[t.id] || 0) + 1;
+      if (streaks[t.id] >= liveSet.streak) {
+        streaks[t.id] = 0;
+        const result = engine.trigger(d.id);
+        if (result) handleResult(result);
+      }
+    });
+    Object.keys(streaks).forEach(id => {
+      if (!tags.find(t => t.id == id)) streaks[id] = 0;
+    });
+    buildBoard();
   }
   loop();
 }
