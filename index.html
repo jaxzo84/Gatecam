@@ -397,9 +397,7 @@ async function loadLibraries() {
     hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,
       [window.ZXing.BarcodeFormat.DATA_MATRIX]);
     hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
-    hints.set(window.ZXing.DecodeHintType.ALSO_INVERTED, true);
-    zxingReader = new window.ZXing.MultiFormatReader();
-    zxingReader.setHints(hints);
+    zxingReader = new window.ZXing.BrowserMultiFormatReader(hints);
   } catch(e) {
     st.textContent = '❌ ZXing init error: ' + e.message;
     st.className = 'ws-err';
@@ -435,30 +433,15 @@ function loadScript(src) {
 }
 
 // Detect DataMatrix in current canvas frame
-function detectQR(canvas, ctx) {
+async function detectQR(canvas, ctx) {
   if (!zxingReader) return [];
   try {
+    const result = await zxingReader.decodeFromCanvas(canvas);
     const dbg = $('dbg-out');
-    let lum;
-
-    // HTMLCanvasElementLuminanceSource är rätt för browser
-    if (window.ZXing.HTMLCanvasElementLuminanceSource) {
-      lum = new window.ZXing.HTMLCanvasElementLuminanceSource(canvas);
-    } else if (window.ZXing.RGBLuminanceSource) {
-      const W = canvas.width, H = canvas.height;
-      const imgData = ctx.getImageData(0, 0, W, H);
-      lum = new window.ZXing.RGBLuminanceSource(imgData.data, W, H);
-    } else {
-      if (dbg) dbg.textContent = '❌ No luminance source available in ZXing build';
-      return [];
-    }
-
-    const bmp  = new window.ZXing.BinaryBitmap(new window.ZXing.HybridBinarizer(lum));
-    const code = zxingReader.decode(bmp);
-    if (dbg) dbg.textContent = `RAW: "${code.getText()}"`;
-    const m = code.getText().match(/^GC:(\d+)$/);
+    if (dbg) dbg.textContent = `RAW: "${result.getText()}"`;
+    const m = result.getText().match(/^GC:(\d+)$/);
     if (!m) return [];
-    const pts = code.getResultPoints();
+    const pts = result.getResultPoints();
     return [{ id: parseInt(m[1]), cornerPoints: pts.map(p => ({x:p.getX(), y:p.getY()})) }];
   } catch(e) {
     const dbg = $('dbg-out');
@@ -711,20 +694,20 @@ $('btn-stopr').addEventListener('click', () => stopRace());
 
 // Kameraloop – kör alltid när kameran är igång
 function startCameraLoop() {
+  let busy = false;
   function loop() {
     if (!liveStream) return;
     requestAnimationFrame(loop);
-    if (vid.readyState < 2) return;
+    if (vid.readyState < 2 || busy) return;
 
-    // Full resolution – DataMatrix behöver fler pixlar än QR
     cvs.width  = vid.videoWidth;
     cvs.height = vid.videoHeight;
     ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
 
-    const tags = detectQR(cvs, ctx);
-
-    // Race-logik – bara om race är igång
-    if (engine?.armed) {
+    busy = true;
+    detectQR(cvs, ctx).then(tags => {
+      busy = false;
+      if (!engine?.armed) return;
       tags.forEach(t => {
         const d = tagLookup[t.id];
         drawQROverlay(t, d?.name);
@@ -740,7 +723,7 @@ function startCameraLoop() {
         if (!tags.find(t => t.id == id)) streaks[id] = 0;
       });
       buildBoard();
-    }
+    }).catch(() => { busy = false; });
   }
   loop();
 }
